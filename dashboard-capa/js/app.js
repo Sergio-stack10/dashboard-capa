@@ -64,7 +64,7 @@ const wLab = d => 'S' + isoWeek(d);
 const cum = a => { let s = 0; return a.map(v => (s += v)); };
 const addDays = (d, n) => { const t = new Date(d + 'T00:00:00'); t.setDate(t.getDate() + n); return t.toISOString().slice(0, 10); };
 const mondayOfW = w => addDays('2025-12-29', (w - 1) * 7);          // semaine 1 de 2026 : lun. 29 déc. 2025
-const mmss = s => { s = Math.round(s || 0); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const sec = s => Math.round(s || 0);               // DMT affichée en secondes (nombre) : 300 = 5 min
 const dShort = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? (+d.slice(8, 10)) + ' ' + MOIS[+d.slice(5, 7) - 1] : (d || '—');
 const rangeLbl = (a, b) => !a && !b ? 'période complète'
   : a && b ? dShort(a) + ' → ' + dShort(b) + (a.slice(0, 4) !== b.slice(0, 4) ? ' ' + b.slice(0, 4) : '')
@@ -1014,14 +1014,14 @@ function r6() {
 
   /* KPIs */
   $('k6').innerHTML =
-    kpi('DMT moyenne', mmss(dmtG), rl + (fsel ? ' · ' + fsel : ' · toutes activités') + ' · min:sec / appel') +
-    kpi('Communication moy.', mmss(N ? COM / N : 0), 'temps de conversation') +
-    kpi('After-call moy.', mmss(N ? ACW / N : 0), 'tâches après appel') +
+    kpi('DMT moyenne', sec(dmtG) + ' s', rl + (fsel ? ' · ' + fsel : ' · toutes activités') + ' · secondes / appel') +
+    kpi('Communication moy.', sec(N ? COM / N : 0) + ' s', 'temps de conversation') +
+    kpi('After-call moy.', sec(N ? ACW / N : 0) + ' s', 'tâches après appel') +
     kpi('Appels répondus', fmt(N), idx.length + ' jour' + (idx.length > 1 ? 's' : '') + ' d\'activité') +
-    (fsel ? '' : kpi('Activité la plus lente', M.flows[slowI] || '—', 'DMT moy. ' + mmss(avg[slowI])));
+    (fsel ? '' : kpi('Activité la plus lente', M.flows[slowI] || '—', 'DMT moy. ' + sec(avg[slowI]) + ' s'));
 
   /* graphique : DMT par jour × activité */
-  const axisSec = { beginAtZero: true, grid: GRID, ticks: { callback: v => mmss(v) } };
+  const axisSec = { beginAtZero: true, grid: GRID, ticks: { precision: 0 }, title: { display: true, text: 'secondes' } };
   mkChart('c6a', { type: 'line', data: { labels, datasets: [
       ...flows.map(f => ({ label: f, data: per(f),
         borderColor: RCOL[f] || PAL[M.flows.indexOf(f) % PAL.length], backgroundColor: 'transparent',
@@ -1030,7 +1030,7 @@ function r6() {
         borderWidth: 2.5, borderDash: [6, 4], pointRadius: 0, tension: .3, spanGaps: true }])] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' },
-        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + mmss(c.parsed.y) } } },
+        tooltip: { callbacks: { label: c => c.parsed.y == null ? null : ' ' + c.dataset.label + ' : ' + sec(c.parsed.y) + ' s' } } },
       scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisSec } } });
 
   /* graphique : moyenne période par activité (communication + after-call empilés) */
@@ -1041,8 +1041,8 @@ function r6() {
       { label: 'After-call work', data: acwA, backgroundColor: '#f59f00', borderRadius: 3 }] },
     options: { indexAxis: 'y', maintainAspectRatio: false,
       plugins: { legend: { position: 'bottom' },
-        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + mmss(c.parsed.x) } } },
-      scales: { x: { stacked: true, grid: GRID, ticks: { callback: v => mmss(v) } },
+        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + sec(c.parsed.x) + ' s' } } },
+      scales: { x: { stacked: true, grid: GRID, ticks: { precision: 0 }, title: { display: true, text: 'secondes' } },
                 y: { stacked: true, grid: { display: false } } } } });
 
   /* tableau : jour × activité */
@@ -1050,12 +1050,12 @@ function r6() {
   idx.forEach((i, j) => {
     const d = M.dates[i];
     h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td>` +
-      M.flows.map(f => { const n = M.f[f].n[i]; return `<td>${n ? mmss(durOf(f, i) / n) : '—'}</td>`; }).join('') +
-      `<td><b>${globAll[j] != null ? mmss(globAll[j]) : '—'}</b></td></tr>`;
+      M.flows.map(f => { const n = M.f[f].n[i]; return `<td>${n ? sec(durOf(f, i) / n) : '—'}</td>`; }).join('') +
+      `<td><b>${globAll[j] != null ? sec(globAll[j]) : '—'}</b></td></tr>`;
   });
   h += '</tbody><tfoot><tr><td colspan="2">Moyenne période</td>' +
-    avg.map(a => `<td>${a ? mmss(a) : '—'}</td>`).join('') +
-    `<td>${dmtAll ? mmss(dmtAll) : '—'}</td></tr></tfoot>`;
+    avg.map(a => `<td>${a ? sec(a) : '—'}</td>`).join('') +
+    `<td>${dmtAll ? sec(dmtAll) : '—'}</td></tr></tfoot>`;
   $('t6').innerHTML = h;
 
   $('w6Src').textContent = 'DMT : ' + (D.meta.dmt || M.file) + ' · ' + idx.length + ' j · ' + rl;

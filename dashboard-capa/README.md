@@ -30,10 +30,11 @@ Déploiement : Cloudflare Pages (ou Workers).
    - tableau journalier cliquable (les jours à venir restent grisés).
 6. **DMT** *(nouveau)* — Durée Moyenne de Traitement issue de l'**Export Vonage Call** :
    - DMT = (durée de communication + after-call work) ÷ **appels répondus**, par jour × activité ;
+   - toutes les valeurs DMT (KPIs, axes, infobulles, tableau) sont en **secondes, format nombre** (ex. `300` = 5 min) ;
    - KPIs : DMT moyenne, communication moy., after-call moy., appels répondus, activité la plus lente ;
    - courbe journalière par activité + ligne Global ;
    - barres empilées communication / after-call par activité ;
-   - tableau jour × activité en min:sec avec moyennes de période.
+   - tableau jour × activité en secondes (nombre entier) avec moyennes de période.
 
 ## Filtres de période
 
