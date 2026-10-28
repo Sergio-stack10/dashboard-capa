@@ -3,7 +3,7 @@
    Dashboard capacitaire – Roadmap Auchan
    Données : localStorage « capaData » sinon data/data.json
    Onglets : p1 Prévu · p2 Capacité · p3 Prévu vs planifié ·
-             p4 Planifié vs réalisé · p5 Réalisé (DRM) · p6 DMT (Vonage)
+             p4 Planifié vs réalisé · p5 Réalisé (DRM) · p6 DMT (Vonage) · p7 Mail (Export Mail)
    ===================================================================== */
 
 /* ---------- constantes ---------- */
@@ -90,7 +90,9 @@ function emptyData() {
            plan: { file: '', rows: [] },
            real: { maj: '', file: '', flows: RFLOW.slice(), dates: [], sem: [], jours: [],
                    f: Object.fromEntries(RFLOW.map(f => [f, { t: [], r: [], s: [] }])) },
-           dmt: { file: '', maj: '', dates: [], flows: [], f: {} } };
+           dmt: { file: '', maj: '', dates: [], flows: [], f: {} },
+           mail: { file: '', maj: '', dates: [], flows: [], f: {} },
+           pmail: { file: '', maj: '', rows: [] } };
 }
 function ensure() {
   if (!D.meta) D.meta = {};
@@ -101,6 +103,8 @@ function ensure() {
   D.real.flows = RFLOW.slice();
   RFLOW.forEach(f => { if (!D.real.f[f]) D.real.f[f] = { t: [], r: [], s: [] }; });
   if (!D.dmt) D.dmt = { file: '', maj: '', dates: [], flows: [], f: {} };
+  if (!D.mail) D.mail = { file: '', maj: '', dates: [], flows: [], f: {} };
+  if (!D.pmail) D.pmail = { file: '', maj: '', rows: [] };
 }
 function save() { try { localStorage.setItem(LS, JSON.stringify(D)); } catch (e) { console.warn('localStorage', e); } }
 function sortReal() {
@@ -114,7 +118,13 @@ function sortDmt() {
   const M = D.dmt, o = M.dates.map((d, i) => [d, i]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
   M.dates = o.map(x => x[0]);
   M.flows.forEach(f => { const F = M.f[f]; if (!F) return;
-    ['n','com','acw'].forEach(k => F[k] = o.map(x => F[k][x[1]] ?? 0)); });
+    ['n','com','acw','lost'].forEach(k => { const a = F[k] || []; F[k] = o.map(x => a[x[1]] ?? 0); }); });
+}
+function sortMail() {
+  const M = D.mail, o = M.dates.map((d, i) => [d, i]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  M.dates = o.map(x => x[0]);
+  M.flows.forEach(f => { const F = M.f[f]; if (!F) return;
+    ['rec','tr','t60','del'].forEach(k => F[k] = o.map(x => (F[k] || [])[x[1]] ?? 0)); });
 }
 
 /* ---------- Chart.js : réglages communs ---------- */
@@ -158,6 +168,8 @@ function renderHead() {
     bits.push('Réalisé : ' + (m.real || D.real.file || 'DRM') + ' (' + D.real.dates.length + ' j)');
   if (D.dmt && D.dmt.dates && D.dmt.dates.length)
     bits.push('DMT : ' + (m.dmt || D.dmt.file || 'Vonage') + ' (' + D.dmt.dates.length + ' j)');
+  if (D.mail && D.mail.dates && D.mail.dates.length)
+    bits.push('Mail : ' + (m.mail || D.mail.file || 'Export Mail') + ' (' + D.mail.dates.length + ' j)');
   $('srcLine').textContent = bits.length ? bits.join('  ·  ') + '  ·  maj ' + (m.maj || '—')
                                          : 'Aucune donnée — cliquez sur « Importer » ou « Démo »';
 }
@@ -335,8 +347,9 @@ function impDmt(name, buf) {
   const cR = head.indexOf('repondu') >= 0 ? head.indexOf('repondu') : col('repondu');
   const cD = col('date de creation') >= 0 ? col('date de creation') : col('date');
   const cM = col('duree de communication'), cA = col('after call work');
+  const cL50 = head.findIndex(h => /sla\s*-?\s*50/.test(h));        // colonne SLA-50 optionnelle (perdus file)
   if (cC < 0 || cD < 0) throw new Error('Colonnes « Compétence » / « Date de création » introuvables');
-  const agg = new Map();                                            // 'date|FLUX' -> [n répondus, sum com, sum acw]
+  const agg = new Map();                                            // 'date|FLUX' -> [n répondus, sum com, sum acw, perdus -50s]
   let nrep = 0;
   for (let i = hi + 1; i < aoa.length; i++) {
     const r = aoa[i] || [];
@@ -347,32 +360,122 @@ function impDmt(name, buf) {
     const rep = cR >= 0 ? n2(r[cR]) : 1;                            // sans colonne Répondu : tout compte
     const com = n2(cM >= 0 ? r[cM] : 0), acw = n2(cA >= 0 ? r[cA] : 0);
     const k = d + '|' + fl;
-    const a = agg.get(k) || [0, 0, 0];
+    const a = agg.get(k) || [0, 0, 0, 0];
     if (rep > 0) { a[0]++; nrep++; a[1] += com; a[2] += acw; }      // seuls les appels répondus entrent dans la DMT
+    if (cL50 >= 0) {                                                // perdus file -50s : toutes lignes (répondues ou non)
+      const v = r[cL50], nv = n2(v);
+      if (nv > 0) a[3] += nv;
+      else if (typeof v === 'string' && v.trim() !== '' && !/^(0|0,0|non|no|false|faux|n|-)$/.test(v.trim())) a[3]++;
+    }
     agg.set(k, a);
   }
   if (!agg.size) throw new Error('Aucune ligne exploitable (vérifiez Compétence / Date de création)');
   const M = D.dmt;
   [...new Set([...agg.keys()].map(k => k.split('|')[1]))].forEach(f => {
-    if (!M.flows.includes(f)) { M.flows.push(f); M.f[f] = { n: [], com: [], acw: [] }; }
+    if (!M.flows.includes(f)) { M.flows.push(f); M.f[f] = { n: [], com: [], acw: [], lost: [] }; }
   });
   const ds = [...new Set([...agg.keys()].map(k => k.split('|')[0]))];
   ds.forEach(d => {
     if (M.dates.indexOf(d) < 0) {
       M.dates.push(d);
-      M.flows.forEach(f => { M.f[f].n.push(0); M.f[f].com.push(0); M.f[f].acw.push(0); });
+      M.flows.forEach(f => { const F = M.f[f]; F.n.push(0); F.com.push(0); F.acw.push(0);
+        if (!F.lost) F.lost = []; F.lost.push(0); });
     }
   });
   sortDmt();
-  agg.forEach(([n, com, acw], k) => {
+  let lostTot = 0;
+  agg.forEach(([n, com, acw, lost], k) => {
     const [d, f] = k.split('|'), di = M.dates.indexOf(d);
     M.f[f].n[di] = n; M.f[f].com[di] = com; M.f[f].acw[di] = acw;   // même jour/flux = remplacé (imports fusionnables)
+    if (!M.f[f].lost) M.f[f].lost = []; M.f[f].lost[di] = lost; lostTot += lost;
   });
   const rank = f => (RFLOW.indexOf(f) < 0 ? 9 : RFLOW.indexOf(f));
   M.flows.sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1));
   M.file = name; M.maj = new Date().toISOString().slice(0, 10);
   D.meta.dmt = name;
-  return fmt(nrep) + ' appels répondus · ' + ds.length + ' jours · ' + M.flows.length + ' activités';
+  return fmt(nrep) + ' appels répondus · ' + ds.length + ' jours · ' + M.flows.length + ' activités' +
+         (cL50 >= 0 ? ' · ' + fmt(lostTot) + ' perdus file -50s (SLA-50)' : '');
+}
+
+/* ---- Mail : Export Mail (1 ligne = 1 courriel) ----
+   Reçus = toutes les lignes · Traités = Statut 1 · QS<60s = traités avec délai < 60 s
+   DMT = Σ délais / traités (s) · Heures de traitement = Σ délais — par jour × activité */
+function impMail(name, buf) {
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  let hi = aoa.findIndex(r => r && r.some(v => norm(v).startsWith('personnalis')));
+  if (hi < 0) hi = 0;
+  const head = (aoa[hi] || []).map(v => norm(v));
+  const cF = head.findIndex(h => h.startsWith('personnalis'));
+  const cS = head.indexOf('statut');
+  const cDel = head.findIndex(h => h.includes('delai de traitement'));
+  const cD = head.findIndex(h => h.includes('acceptation'));       // « Date d'acceptation » (ou sa copie)
+  if (cF < 0 || cD < 0) throw new Error("Colonnes « Personnalisé » / « Date d'acceptation » introuvables");
+  const agg = new Map();                                           // 'date|flux' -> [reçus, traités, <60s, Σ délais]
+  let tot = 0, skip = 0;
+  for (let i = hi + 1; i < aoa.length; i++) {
+    const r = aoa[i] || [];
+    if (!r || !r.some(v => v != null)) continue;
+    const d = isoD(r[cD]);
+    const fl = String(r[cF] ?? '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !fl) { skip++; continue; }
+    const a = agg.get(d + '|' + fl) || [0, 0, 0, 0];
+    a[0]++;                                                        // reçu
+    const st = n2(cS >= 0 ? r[cS] : 1);
+    const delai = n2(cDel >= 0 ? r[cDel] : 0);
+    if (Math.round(st) === 1) { a[1]++; a[3] += delai; if (delai > 0 && delai < 60) a[2]++; }
+    agg.set(d + '|' + fl, a);
+    tot++;
+  }
+  if (!agg.size) throw new Error("Aucune ligne exploitable (vérifiez Personnalisé / Date d'acceptation)");
+  const M = D.mail;
+  [...new Set([...agg.keys()].map(k => k.split('|')[1]))].forEach(f => {
+    if (!M.flows.includes(f)) { M.flows.push(f); M.f[f] = { rec: [], tr: [], t60: [], del: [] }; }
+  });
+  const ds = [...new Set([...agg.keys()].map(k => k.split('|')[0]))];
+  ds.forEach(d => {
+    if (M.dates.indexOf(d) < 0) {
+      M.dates.push(d);
+      M.flows.forEach(f => { const F = M.f[f]; F.rec.push(0); F.tr.push(0); F.t60.push(0); F.del.push(0); });
+    }
+  });
+  sortMail();
+  agg.forEach(([rec, tr, t60, del], k) => {
+    const [d, f] = k.split('|'), di = M.dates.indexOf(d);
+    M.f[f].rec[di] = rec; M.f[f].tr[di] = tr; M.f[f].t60[di] = t60; M.f[f].del[di] = del;   // même jour/flux = remplacé
+  });
+  const rank = f => { const i = RFLOW.indexOf(f.toUpperCase()); return i < 0 ? 9 : i; };
+  M.flows.sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1));
+  M.file = name; M.maj = new Date().toISOString().slice(0, 10);
+  D.meta.mail = name;
+  return fmt(tot) + ' courriels · ' + ds.length + ' jours · ' + M.flows.length + ' activités' +
+         (skip ? ' · ' + skip + ' ligne(s) ignorée(s) (activité/date vide)' : '');
+}
+
+/* ---- Prévision Mail : colonnes date · flux · prevu (ou prévision) ---- */
+function impPmail(name, buf) {
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  let hi = aoa.findIndex(r => r && r.some(v => norm(v) === 'date'));
+  if (hi < 0) hi = 0;
+  const head = (aoa[hi] || []).map(v => norm(v));
+  const cD = head.indexOf('date') >= 0 ? head.indexOf('date') : head.findIndex(h => h.includes('date'));
+  const cF = head.findIndex(h => h === 'flux' || h === 'activite' || h.includes('flux') || h.includes('activit'));
+  const cP = head.findIndex(h => h === 'prevu' || h === 'prev' || h.includes('prevu') || h.includes('prevision'));
+  if (cD < 0 || cF < 0 || cP < 0) throw new Error('Colonnes date / flux / prevu introuvables');
+  const rows = [];
+  for (let i = hi + 1; i < aoa.length; i++) {
+    const r = aoa[i] || []; const d = isoD(r[cD]); const f = String(r[cF] ?? '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !f) continue;
+    const v = n2(r[cP]); if (!v) continue;
+    rows.push([d, f, v]);
+  }
+  if (!rows.length) throw new Error('Aucune prévision lue');
+  D.pmail = { file: name, maj: new Date().toISOString().slice(0, 10), rows };   // remplace la prévision
+  D.meta.pmail = name;
+  return rows.length + ' lignes de prévision · ' + new Set(rows.map(r => r[0])).size + ' jours';
 }
 
 /* ---- modèle plan (.xlsx) ---- */
@@ -407,6 +510,14 @@ function bindImports() {
   $('fDmt').addEventListener('change', e => readFile(e.target, (f, b) => {
     try { setStatus('stDmt', impDmt(f.name, b), true); afterImport('p6'); }
     catch (err) { setStatus('stDmt', 'Erreur : ' + err.message, false); }
+  }));
+  $('fMail').addEventListener('change', e => readFile(e.target, (f, b) => {
+    try { setStatus('stMail', impMail(f.name, b), true); afterImport('p7'); }
+    catch (err) { setStatus('stMail', 'Erreur : ' + err.message, false); }
+  }));
+  $('fPmail').addEventListener('change', e => readFile(e.target, (f, b) => {
+    try { setStatus('stPmail', impPmail(f.name, b), true); afterImport('p7'); }
+    catch (err) { setStatus('stPmail', 'Erreur : ' + err.message, false); }
   }));
 }
 function afterImport(page) {
@@ -464,6 +575,22 @@ function demo() {
       M.f[f].n.push(n); M.f[f].com.push(n * Math.round(dm - 31)); M.f[f].acw.push(n * 31);
     });
   });
+  /* mail démo : Export Mail + prévision mail */
+  const ML = base.mail; ML.file = 'Démo Export Mail'; ML.maj = new Date().toISOString().slice(0, 10);
+  ML.dates = past.slice(); ML.flows = ['Hyper', 'AFR', 'Drive', 'Waaoh'];
+  ML.flows.forEach((f, fi) => {
+    ML.f[f] = { rec: [], tr: [], t60: [], del: [] };
+    ML.dates.forEach(d => {
+      const rec = 25 + Math.round(80 * Math.abs(Math.sin(+d.slice(8) + fi * 1.3)));
+      const dm = Math.max(150, 330 + 70 * Math.sin(+d.slice(8) / 4 + fi));
+      ML.f[f].rec.push(rec); ML.f[f].tr.push(rec);
+      ML.f[f].t60.push(Math.round(rec * (0.03 + 0.05 * Math.abs(Math.sin(fi)))));
+      ML.f[f].del.push(rec * Math.round(dm));
+    });
+  });
+  base.pmail = { file: 'Démo Prévision Mail', maj: new Date().toISOString().slice(0, 10), rows: [] };
+  past.forEach(d => ML.flows.forEach((f, fi) =>
+    base.pmail.rows.push([d, f, Math.round(30 + 22 * Math.sin(+d.slice(8) / 5 + fi))])));
   /* réalisé démo cohérent avec le plan (agrégat jour × flux voix) */
   const R = base.real; R.file = 'Démo DRM'; R.maj = new Date().toISOString().slice(0, 10);
   rows.forEach(([d, , f, , , re]) => {
@@ -504,6 +631,9 @@ function fillSelects() {
   /* p6 : activités DMT */
   $('s6F').innerHTML = '<option value="">Toutes les activités</option>' +
     (D.dmt.flows || []).map(f => `<option value="${f}">${f}</option>`).join('');
+  /* p7 : activités mail */
+  $('s7F').innerHTML = '<option value="">Toutes les activités</option>' +
+    (D.mail.flows || []).map(f => `<option value="${f}">${f}</option>`).join('');
   /* sources */
   const src = t => (D.meta[t] || D[t] && D[t].file || '—');
   $('w1Src').textContent = 'Roadmap : ' + (D.roadmap.length ? D.meta.roadmap : '—');
@@ -516,13 +646,17 @@ function fillSelects() {
   $('w6Src').textContent = D.dmt.dates.length
     ? 'DMT : ' + (D.meta.dmt || D.dmt.file) + ' · ' + D.dmt.dates[0] + ' → ' + D.dmt.dates[D.dmt.dates.length - 1]
     : 'Export Vonage : à importer';
+  $('w7Src').textContent = D.mail.dates.length
+    ? 'Mail : ' + (D.meta.mail || D.mail.file) + ' · ' + D.mail.dates[0] + ' → ' + D.mail.dates[D.mail.dates.length - 1]
+    : 'Export Mail : à importer';
 }
 
 /* =====================================================================
    FILTRES DE PÉRIODE (un jeu de contrôles par onglet)
    ===================================================================== */
 const PERIOD_P = { p1: ['d1A','d1B','d1P'], p2: ['d2A','d2B','d2P'], p3: ['d3A','d3B','d3P'],
-                   p4: ['d4A','d4B','d4P'], p5: ['d5A','d5B','d5P'], p6: ['d6A','d6B','d6P'] };
+                   p4: ['d4A','d4B','d4P'], p5: ['d5A','d5B','d5P'], p6: ['d6A','d6B','d6P'],
+                   p7: ['d7A','d7B','d7P'] };
 function perBounds(p) {                                            // bornes de données de l'onglet
   switch (p) {
     case 'p1': { const W = Math.max(1, ...D.roadmap.map(a => a.prev.length));
@@ -532,6 +666,7 @@ function perBounds(p) {                                            // bornes de 
                  return d.length ? [d[0], d[d.length - 1]] : []; }
     case 'p5': { const d = D.real.dates; return d.length ? [d[0], d[d.length - 1]] : []; }
     case 'p6': { const d = D.dmt.dates; return d.length ? [d[0], d[d.length - 1]] : []; }
+    case 'p7': { const d = D.mail.dates; return d.length ? [d[0], d[d.length - 1]] : []; }
   }
   return [];
 }
@@ -816,6 +951,7 @@ function bindUI() {
   RENDERS.p1 = r1; RENDERS.p2 = r2; RENDERS.p3 = r3; RENDERS.p4 = r4;
   bind5();
   bind6();
+  bind7();
   boot2();
 }
 function boot2() { /* complété en partie 3 (page 5) */ }
@@ -1065,6 +1201,138 @@ function bind6() {
   $('s6F').addEventListener('change', r6);
   bindPeriod('p6', r6);
   RENDERS.p6 = r6;
+}
+
+/* =====================================================================
+   P7 — MAIL (Export Mail : réalisé du canal mail, par jour × activité)
+   QS = traités/reçus · QP = reçus/prévision · QS<60s = traités<60s/reçus
+   QE = si QP>115% : (traités/prévision)×92% · T/P = traités/prévision
+   ===================================================================== */
+const hhDur = s => { s = Math.round(s || 0); let h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  if (m === 60) { h++; m = 0; } return h + ' h ' + String(m).padStart(2, '0'); };
+function prevMailMap() {                                           // flux normalisé -> {date : prévision}
+  const PM = {};
+  ((D.pmail && D.pmail.rows) || []).forEach(([d, f, v]) => {
+    const k = norm(f); PM[k] = PM[k] || {}; PM[k][d] = (PM[k][d] || 0) + v;
+  });
+  return PM;
+}
+function r7() {
+  const M = D.mail;
+  const has = M.dates.length > 0;
+  $('p7body').style.display = has ? '' : 'none';
+  $('p7empty').style.display = has ? 'none' : '';
+  if (!has) { $('w7Src').textContent = 'Export Mail : à importer'; return; }
+  const idx = M.dates.map((d, i) => [d, i]).filter(([d]) => inPer('p7', d)).map(([, i]) => i);
+  if (!idx.length) { noPer('p7', 'k7', ['c7a', 'c7b'], 't7'); $('k7b').innerHTML = '';
+    $('w7Src').textContent = 'Mail : aucun jour sur ' + rangeLbl(...perRange('p7')); return; }
+  const rl = rangeLbl(...perRange('p7'));
+  const fsel = $('s7F').value;
+  const flows = fsel ? [fsel] : M.flows;
+  const PM = prevMailMap();
+  const prevOf = (f, d) => { const p = PM[norm(f)]; return p ? (p[d] || 0) : 0; };
+
+  /* séries journalières */
+  const labels = idx.map(i => M.dates[i].slice(8, 10) + '/' + M.dates[i].slice(5, 7));
+  const recJ = idx.map(i => flows.reduce((s, f) => s + (M.f[f].rec[i] || 0), 0));
+  const trJ  = idx.map(i => flows.reduce((s, f) => s + (M.f[f].tr[i] || 0), 0));
+  const t60J = idx.map(i => flows.reduce((s, f) => s + (M.f[f].t60[i] || 0), 0));
+  const pvJ  = idx.map(i => flows.reduce((s, f) => s + prevOf(f, M.dates[i]), 0));
+  const q = (a, b) => b ? Math.round(a / b * 100) : null;          // ratio en % ou null
+  const qsJ  = trJ.map((v, j) => q(v, recJ[j]));
+  const q60J = t60J.map((v, j) => q(v, recJ[j]));
+  const qpJ  = pvJ.map((v, j) => q(recJ[j], v));
+  const tpJ  = pvJ.map((v, j) => q(trJ[j], v));
+
+  /* agrégats de période */
+  let REC = 0, TR = 0, T60 = 0, DEL = 0, PV = 0;
+  flows.forEach(f => idx.forEach(i => { REC += M.f[f].rec[i] || 0; TR += M.f[f].tr[i] || 0;
+    T60 += M.f[f].t60[i] || 0; DEL += M.f[f].del[i] || 0; PV += prevOf(f, M.dates[i]); }));
+  const QS = q(TR, REC), QS60 = q(T60, REC), QP = q(REC, PV), TP = q(TR, PV);
+  const QE = (QP != null && QP > 115) ? Math.round(TR / PV * 92) : null;
+
+  /* perdus file -50s : colonne SLA-50 de l'Export Vonage (via l'import DMT) */
+  const L = D.dmt; let lost = null;
+  if (L.dates && L.dates.length) {
+    lost = 0;
+    idx.forEach(i => { const li = L.dates.indexOf(M.dates[i]); if (li < 0) return;
+      L.flows.forEach(f => { if (fsel && norm(f) !== norm(fsel)) return;
+        lost += (L.f[f].lost && L.f[f].lost[li]) || 0; }); });
+  }
+
+  /* KPIs — indicateurs de performance */
+  $('k7').innerHTML =
+    kpi('QS — qualité de service', QS == null ? '—' : QS + ' %', 'traités / reçus · ' + rl + (fsel ? ' · ' + fsel : '')) +
+    kpi('QP — qualité de production', QP == null ? '—' : QP + ' %', PV ? 'reçus / prévision' : 'reçus / prévision · prévision non importée') +
+    kpi('QS < 60 s', QS60 == null ? '—' : QS60 + ' %', 'traités < 60 s / reçus') +
+    kpi('QE — efficacité', QE == null ? '—' : QE + ' %', QP != null && QP > 115 ? 'QP > 115 % : (traités / prévision) × 92 %' : 'applicable si QP > 115 %') +
+    kpi('T/P — traités / prévision', TP == null ? '—' : TP + ' %', PV ? 'production vs prévision' : 'prévision non importée');
+
+  /* KPIs — nombres */
+  $('k7b').innerHTML =
+    kpi('Contacts traités', fmt(TR), idx.length + ' jour' + (idx.length > 1 ? 's' : '') + (fsel ? ' · ' + fsel : ' · toutes activités')) +
+    kpi('Contacts reçus', fmt(REC), 'courriels acceptés') +
+    kpi('Prévision de contacts', PV ? fmt(PV) : '—', (D.pmail && D.pmail.rows.length) ? (D.meta.pmail || D.pmail.file) : 'import « Prévision Mail »') +
+    kpi('Perdus file -50s', lost == null ? '—' : fmt(lost), 'colonne SLA-50 (Export Vonage)') +
+    kpi('Heures de traitement', hhDur(DEL), 'somme des délais de traitement') +
+    kpi('DMT', TR ? sec(DEL / TR) + ' s' : '—', 'délai moyen par traité');
+
+  /* graphique : journalier reçus / traités / prévision */
+  mkChart('c7a', { type: 'bar', data: { labels, datasets: [
+      { label: 'Reçus', data: recJ, backgroundColor: '#3b5bdb', borderRadius: 3 },
+      { label: 'Traités', data: trJ, backgroundColor: '#0ca678', borderRadius: 3 },
+      ...(PV ? [{ label: 'Prévision', data: pvJ, type: 'line', borderColor: '#f59f00',
+        borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .3 }] : [])] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt(c.parsed.y ?? c.parsed) } } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisY('courriels') } } });
+
+  /* graphique : qualité journalière (%) */
+  const axP7 = { beginAtZero: true, grid: GRID, ticks: { callback: v => v + ' %' } };
+  const ln = (lab, data, col, dash) => ({ label: lab, data, borderColor: col, backgroundColor: 'transparent',
+    borderDash: dash ? [5, 4] : [], borderWidth: 2, pointRadius: 1.5, tension: .3, spanGaps: true });
+  mkChart('c7b', { type: 'line', data: { labels, datasets: [
+      ln('QS', qsJ, '#0ca678'), ln('QS < 60 s', q60J, '#3b5bdb'),
+      ln('QP', qpJ, '#f59f00', true), ln('T/P', tpJ, '#7048e8')] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => c.parsed.y == null ? null : ' ' + c.dataset.label + ' : ' + Math.round(c.parsed.y) + ' %' } } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axP7 } } });
+
+  /* tableau : jour × activité — tous les indicateurs */
+  let h = '<thead><tr><th>Date</th><th>Jour</th><th>Activité</th><th>Reçus</th><th>Traités</th><th>Prévision</th>' +
+          '<th>QS</th><th>QP</th><th>QS &lt; 60 s</th><th>T/P</th><th>QE</th><th>Heures</th><th>DMT</th></tr></thead><tbody>';
+  idx.forEach(i => { const d = M.dates[i];
+    flows.forEach(f => {
+      const rec = M.f[f].rec[i] || 0, tr = M.f[f].tr[i] || 0, t60 = M.f[f].t60[i] || 0, del = M.f[f].del[i] || 0;
+      const pv = prevOf(f, d);
+      if (!rec && !tr && !pv) return;
+      const qp = q(rec, pv), tp = q(tr, pv), qe = (qp != null && qp > 115) ? Math.round(tr / pv * 92) : null;
+      h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td><td>${f}</td><td>${rec ? fmt(rec) : '—'}</td>` +
+           `<td>${tr ? fmt(tr) : '—'}</td><td>${pv ? fmt(pv) : '—'}</td>` +
+           `<td>${pctS(tr, rec)}</td><td>${qp == null ? '—' : qp + ' %'}</td>` +
+           `<td>${pctS(t60, rec)}</td><td>${tp == null ? '—' : tp + ' %'}</td>` +
+           `<td>${qe == null ? '—' : qe + ' %'}</td>` +
+           `<td>${del ? fmt1(del / 3600) + ' h' : '—'}</td><td>${tr ? sec(del / tr) + ' s' : '—'}</td></tr>`;
+    });
+  });
+  h += '</tbody><tfoot><tr><td colspan="3">Total période</td>' +
+       `<td>${fmt(REC)}</td><td>${fmt(TR)}</td><td>${PV ? fmt(PV) : '—'}</td>` +
+       `<td>${QS == null ? '—' : QS + ' %'}</td><td>${QP == null ? '—' : QP + ' %'}</td>` +
+       `<td>${QS60 == null ? '—' : QS60 + ' %'}</td><td>${TP == null ? '—' : TP + ' %'}</td>` +
+       `<td>${QE == null ? '—' : QE + ' %'}</td>` +
+       `<td>${DEL ? fmt1(DEL / 3600) + ' h' : '—'}</td><td>${TR ? sec(DEL / TR) + ' s' : '—'}</td></tr></tfoot>`;
+  $('t7').innerHTML = h;
+
+  $('w7Src').textContent = 'Mail : ' + (D.meta.mail || M.file) + ' · ' + idx.length + ' j · ' + rl +
+    ((D.pmail && D.pmail.rows.length) ? ' · prévision : ' + (D.meta.pmail || D.pmail.file) : '');
+}
+
+function bind7() {
+  $('s7F').addEventListener('change', r7);
+  bindPeriod('p7', r7);
+  RENDERS.p7 = r7;
 }
 
 boot();

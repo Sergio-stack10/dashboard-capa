@@ -7,15 +7,16 @@ Déploiement : Cloudflare Pages (ou Workers).
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Interface : 6 onglets + dialog d'import (5 sources) |
+| `index.html` | Interface : 7 onglets + dialog d'import (7 sources) |
 | `js/app.js` | Logique applicative (données, imports, graphiques, filtres de période) |
-| `data/data.json` | Données intégrées : roadmap + capacité + réalisé (DRM oct. 2026) + **DMT (Vonage, 1–25 oct.)** |
+| `data/data.json` | Données intégrées : roadmap + capacité + réalisé (DRM oct. 2026) + DMT (Vonage, 1–25 oct.) + **Mail (Export Mail, 1–25 oct.)** |
 | `favicon.svg` | Icône de l'outil (onglet navigateur) |
 | `_headers` | Cloudflare Pages : pas de cache sur `data/data.json` |
 | `scripts/build_data.py` | Régénère `data/data.json` : fusionne un DRM dans les données existantes |
 | `scripts/build_dmt.py` | Injecte un Export Vonage Call (DMT) dans `data/data.json` |
+| `scripts/build_mail.py` | Injecte un Export Mail (canal mail) dans `data/data.json` |
 
-## Les 6 onglets
+## Les 7 onglets
 
 1. **Prévu** — roadmap hebdomadaire (10 activités × 52 sem.) : prévu vs capacité + ETP.
 2. **Capacité** — capacitaire journalier (275 jours, 8 flux) en vue jour / semaine / mois.
@@ -35,6 +36,14 @@ Déploiement : Cloudflare Pages (ou Workers).
    - courbe journalière par activité + ligne Global ;
    - barres empilées communication / after-call par activité ;
    - tableau jour × activité en secondes (nombre entier) avec moyennes de période.
+7. **Mail** *(nouveau)* — réalisé du canal mail, issu de l'**Export Mail** (une ligne par courriel), par jour × activité :
+   - **Indicateurs du projet** : `QS = traités / reçus` · `QP = reçus / prévision` · `QS < 60 s = traités < 60 s / reçus` ·
+     `QE = (traités / prévision) × 92 %` (applicable **si QP > 115 %**, sinon « — ») · `T/P = traités / prévision` ;
+   - **Nombres** : contacts traités (Statut = 1), contacts reçus, prévision de contacts (import « Prévision Mail »),
+     contacts perdus dans la file -50s (colonne `SLA-50` de l'Export Vonage Call), heures de traitement (Σ délais),
+     DMT en secondes (Σ délais ÷ traités) ;
+   - graphique journalier reçus / traités / prévision + courbes de qualité (QS, QS < 60 s, QP, T/P) ;
+   - tableau jour × activité avec tous les indicateurs et un total de période.
 
 ## Filtres de période
 
@@ -49,7 +58,9 @@ Les filtres sont conservés quand on change d'onglet ; le bouton **Exporter** ne
 - **Capacité** : `.xlsx`, onglet `DAILY VISION`, dates ligne 15, lignes « Capacitaire en actes ».
 - **Planifié** : colonnes `date, creneau, flux, prevu, planifie, realise` (un modèle `.xlsx` est téléchargeable dans le dialog).
 - **Réalisé — DRM** : table journalière `SEMAINE / JOUR / DATE` + groupes `Traités · Reçus · Traités 60s` × flux (HYPER, C2E, AFR, DRIVE, SAV). La lecture s'arrête automatiquement à la 2e table (QS/QP) et ignore les lignes MTD / Global MTD. **Chaque mois importé s'additionne** aux précédents (même date = valeur remplacée).
-- **DMT — Export Vonage Call** *(nouveau)* : une ligne par appel avec `Compétence · Répondu · After Call Work Time · Durée de communication · Date de création`. Seuls les appels répondus comptent ; même jour/activité = valeur remplacée (les exports mensuels se cumulent). Toute activité du fichier est acceptée (BARCELONE incluse).
+- **DMT — Export Vonage Call** *(nouveau)* : une ligne par appel avec `Compétence · Répondu · After Call Work Time · Durée de communication · Date de création`. Seuls les appels répondus comptent ; même jour/activité = valeur remplacée (les exports mensuels se cumulent). Toute activité du fichier est acceptée (BARCELONE incluse). Si l'export contient une colonne **`SLA-50`**, chaque ligne marquée compte comme un contact **perdu dans la file -50s** (lignes répondues ou non) et alimente l'onglet Mail.
+- **Mail — Export Mail** *(nouveau)* : une ligne par courriel avec `Personnalisé · Statut · Délai de traitement · Date d'acceptation`. Reçus = toutes les lignes ; traités = **Statut 1** ; les lignes sans activité ou sans date sont ignorées (et signalées). Même jour/activité = valeur remplacée.
+- **Prévision Mail** *(nouveau)* : colonnes `date · flux · prevu` (ou « prévision »). Alimente QP, T/P et QE de l'onglet Mail ; l'import remplace la prévision précédente.
 
 Les imports sont conservés dans le navigateur (localStorage). Le bouton **Exporter** produit le
 `data.json` complet à déposer dans `data/` pour le publier pour tous les utilisateurs.
@@ -72,6 +83,16 @@ Option B (script) :
 ```bash
 python scripts/build_dmt.py "chemin/Export Vonage Call.xlsx" data/data.json
 git add data/data.json && git commit -m "DMT semaine 44" && git push
+```
+
+## Mise à jour du Mail en production
+
+Option A (interface) : Importer → Export Mail (+ Prévision Mail) → Exporter → remplacer `data/data.json` → push.
+
+Option B (script) :
+```bash
+python scripts/build_mail.py "chemin/Export Mail.xlsx" data/data.json
+git add data/data.json && git commit -m "Mail semaine 44" && git push
 ```
 
 ## Déploiement Cloudflare Pages
