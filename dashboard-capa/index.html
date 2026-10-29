@@ -37,6 +37,9 @@ nav.tabs button{border:1px solid transparent;background:transparent;color:var(--
 nav.tabs button:hover{color:var(--pri)}
 nav.tabs button.on{background:var(--card);border-color:var(--line);border-bottom-color:var(--card);color:var(--pri);box-shadow:var(--sh)}
 nav.tabs .badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:99px;background:var(--pri);color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.prodgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.pitem label{display:block;font-size:11px;font-weight:700;color:var(--mut);margin-bottom:2px;text-transform:uppercase;letter-spacing:.4px}
+.pitem input{width:100%;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit}
 main{padding:0 20px 40px}
 section.page{display:none;padding-top:16px}
 section.page.on{display:block}
@@ -121,18 +124,17 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 </header>
 
 <nav class="tabs" role="tablist">
-  <button data-p="p1" class="on">Prévu</button>
-  <button data-p="p2">Capacité</button>
-  <button data-p="p3">Prévu vs planifié</button>
-  <button data-p="p4">Planifié vs réalisé</button>
-  <button data-p="p5">Réalisé</button>
-  <button data-p="p6">DMT<span class="badge">nouveau</span></button>
+  <button data-p="p1" class="on">Roadmap</button>
+  <button data-p="p2">Capacitaire</button>
+  <button data-p="p3">Capa prévu vs Capa réel</button>
+  <button data-p="p5">Productivité</button>
+  <button data-p="p6">DMT</button>
   <button data-p="p7">Mail</button>
 </nav>
 
 <main>
 
-<!-- ================= P1 : PRÉVU (roadmap) ================= -->
+<!-- ================= P1 : ROADMAP (prévisions + ETP) ================= -->
 <section id="p1" class="page on">
   <div class="toolbar">
     <div class="grp"><label>Activité</label><select id="w1Act"></select></div>
@@ -145,17 +147,19 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   </div>
   <div class="kpis" id="k1"></div>
   <div class="grid2">
-    <div class="card"><h3>Prévu vs Capacité — par semaine</h3><div class="charthold"><canvas id="c1a"></canvas></div></div>
-    <div class="card"><h3>ETP requis — par semaine</h3><div class="charthold"><canvas id="c1b"></canvas></div></div>
+    <div class="card"><h3>Contacts prévisionnels par activité — par semaine</h3><div class="charthold"><canvas id="c1a"></canvas></div></div>
+    <div class="card"><h3>ETP prévus — par semaine</h3><div class="charthold"><canvas id="c1b"></canvas></div></div>
   </div>
 </section>
 
-<!-- ================= P2 : CAPACITÉ ================= -->
+<!-- ================= P2 : CAPACITAIRE (actes & heures) ================= -->
 <section id="p2" class="page">
   <div class="toolbar">
     <div class="grp"><label>Granularité</label><select id="s2G">
       <option value="jour">Jour</option><option value="semaine">Semaine</option><option value="mois">Mois</option></select></div>
-    <div class="grp"><label>Flux</label><select id="s2F"></select></div>
+    <div class="grp"><label>Unité</label><select id="s2U">
+      <option value="a" selected>Actes</option><option value="h">Heures</option></select></div>
+    <div class="grp"><label>Activité</label><select id="s2F"></select></div>
     <div class="grp"><label>Du</label><input type="date" id="d2A"></div>
     <div class="grp"><label>Au</label><input type="date" id="d2B"></div>
     <div class="grp"><label>Période</label><select id="d2P">
@@ -164,18 +168,20 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
     <div class="src" id="w2Src"></div>
   </div>
   <div class="kpis" id="k2"></div>
-  <div class="card"><h3>Capacitaire par flux vs Prévu / Contractuel</h3><div class="charthold tall"><canvas id="c2a"></canvas></div></div>
+  <div class="card"><h3>Capacitaire vs Prévu / Contractuel</h3><div class="charthold tall"><canvas id="c2a"></canvas></div></div>
   <div class="card"><h3>Détail par période</h3><div class="tblwrap"><table id="t2"></table></div></div>
+  <div class="card"><h3>Hypothèses de productivité — actes / heure</h3>
+    <p class="hint">Saisissez les actes traités par heure et par activité. Elles convertissent heures ↔ actes : capacitaire en heures (si absente du fichier CAPA), capa réelle issue du planning (onglet « Capa prévu vs Capa réel »), productivité et taux d'occupation.</p>
+    <div class="prodgrid" id="prodEd"></div>
+  </div>
 </section>
 
-<!-- ================= P3 : PRÉVU VS PLANIFIÉ ================= -->
+<!-- ================= P3 : CAPA PRÉVU VS CAPA RÉEL ================= -->
 <section id="p3" class="page">
   <div class="toolbar">
     <div class="grp"><label>Granularité</label><select id="s3G">
       <option value="mois">Mois</option><option value="semaine">Semaine</option><option value="jour">Jour</option></select></div>
-    <div class="grp"><label>Prévu =</label><select id="s3S">
-      <option value="capa">Capacité</option><option value="contr">Contractuel</option></select></div>
-    <div class="grp"><label>Flux</label><select id="s3F"></select></div>
+    <div class="grp"><label>Activité</label><select id="s3F"></select></div>
     <div class="grp"><label>Du</label><input type="date" id="d3A"></div>
     <div class="grp"><label>Au</label><input type="date" id="d3B"></div>
     <div class="grp"><label>Période</label><select id="d3P">
@@ -185,66 +191,39 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   </div>
   <div class="kpis" id="k3"></div>
   <div class="grid2">
-    <div class="card"><h3>Prévu vs Planifié</h3><div class="charthold"><canvas id="c3a"></canvas></div></div>
-    <div class="card"><h3>Détail par période</h3><div class="tblwrap"><table id="t3"></table></div></div>
+    <div class="card"><h3>Capacitaire en actes — prévue vs réelle (planning) vs réalisé</h3><div class="charthold"><canvas id="c3a"></canvas></div></div>
+    <div class="card"><h3>Capacitaire en heures — prévue vs planifiée</h3><div class="charthold"><canvas id="c3b"></canvas></div></div>
   </div>
+  <div class="card"><h3>Détail par période</h3><div class="tblwrap"><table id="t3"></table></div></div>
+  <div class="card"><p class="hint" id="p3Hint"></p></div>
 </section>
 
-<!-- ================= P4 : PLANIFIÉ VS RÉALISÉ ================= -->
-<section id="p4" class="page">
-  <div class="toolbar">
-    <div class="grp"><label>Granularité</label><select id="s4G">
-      <option value="mois">Mois</option><option value="semaine">Semaine</option>
-      <option value="jour">Jour</option><option value="creneau">Créneau 30 min</option></select></div>
-    <div class="grp"><label>Flux</label><select id="s4F"></select></div>
-    <div class="grp"><label>Du</label><input type="date" id="d4A"></div>
-    <div class="grp"><label>Au</label><input type="date" id="d4B"></div>
-    <div class="grp"><label>Période</label><select id="d4P">
-      <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
-      <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
-    <div class="src" id="w4Src"></div>
-  </div>
-  <div class="kpis" id="k4"></div>
-  <div class="grid2">
-    <div class="card"><h3>Planifié vs Réalisé (prévu en pointillé)</h3><div class="charthold"><canvas id="c4a"></canvas></div></div>
-    <div class="card"><h3>Détail par période</h3><div class="tblwrap"><table id="t4"></table></div></div>
-  </div>
-  <div class="card"><p class="hint" id="p4Hint"></p></div>
-</section>
-
-<!-- ================= P5 : RÉALISÉ (nouveau) ================= -->
+<!-- ================= P5 : PRODUCTIVITÉ (Phone / Mail / Chat) ================= -->
 <section id="p5" class="page">
   <div class="toolbar">
+    <div class="grp"><label>Canal</label><select id="s5C">
+      <option value="phone" selected>Phone</option><option value="mail">Mail</option><option value="chat">Chat</option></select></div>
+    <div class="grp"><label>Activité</label><select id="s5F"></select></div>
     <div class="grp"><label>Du</label><input type="date" id="d5A"></div>
     <div class="grp"><label>Au</label><input type="date" id="d5B"></div>
     <div class="grp"><label>Période</label><select id="d5P">
       <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
       <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
-    <div class="grp"><label>Flux</label><select id="s5F"></select></div>
     <div class="src" id="w5Src"></div>
   </div>
   <div id="p5body">
     <div class="kpis" id="k5"></div>
+    <div class="kpis" id="k5b"></div>
     <div class="grid2">
-      <div class="card"><h3>Journalier — reçus / traités / taux &lt; 60 s</h3><div class="charthold tall"><canvas id="c5a"></canvas></div></div>
-      <div class="card"><h3>Cumulé du mois (MTD)</h3><div class="charthold tall"><canvas id="c5b"></canvas></div></div>
+      <div class="card"><h3>Journalier — reçus / traités / prévision</h3><div class="charthold tall"><canvas id="c5a"></canvas></div></div>
+      <div class="card"><h3>Qualité journalière — QS · QS &lt; 60 s · QP · T/P</h3><div class="charthold tall"><canvas id="c5b"></canvas></div></div>
     </div>
-    <div class="grid2">
-      <div class="card"><h3>Répartition par flux — traités du mois</h3><div class="charthold"><canvas id="c5c"></canvas></div></div>
-      <div class="card">
-        <h3>Planifié vs Réalisé — journée sélectionnée</h3>
-        <div class="toolbar" style="margin-bottom:8px"><div class="grp"><label>Jour</label><input type="date" id="s5Day"></div>
-          <button class="btn" id="b5Go4" style="margin-left:auto">Ouvrir « Planifié vs réalisé »</button></div>
-        <div class="tblwrap" style="max-height:260px"><table id="t5rel"></table></div>
-        <p class="relnote" id="t5note"></p>
-      </div>
-    </div>
-    <div class="card"><h3>Détail journalier — cliquer une ligne pour la comparer au planifié</h3>
+    <div class="card"><h3>Répartition par activité — traités de la période</h3><div class="charthold"><canvas id="c5c"></canvas></div></div>
+    <div class="card"><h3>Détail jour × activité — tous les indicateurs</h3>
       <div class="tblwrap"><table id="t5"></table></div></div>
   </div>
   <div class="card empty" id="p5empty" style="display:none">
-    <b>Aucune donnée « Réalisé ».</b><br>Importez un fichier DRM (table journalière avec « Traités / Reçus / Traités 60s »)
-    via le bouton <b>Importer</b> pour alimenter cet onglet.
+    <b id="p5emptyT"></b><br><span id="p5emptyS"></span>
   </div>
 </section>
 
@@ -302,7 +281,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 
 </main>
 
-<footer class="pfoot">Sources : Roadmap (.xlsm) · Capacité (DAILY VISION) · Planifié (plan journalier/créneaux) · Réalisé (DRM) · DMT (Export Vonage Call) · Mail (Export Mail + Prévision Mail) — les données importées restent dans ce navigateur ; utilisez « Exporter » pour produire le data.json de déploiement.</footer>
+<footer class="pfoot">Sources : Roadmap (.xlsm — prévisions contacts + ETP) · Capacitaire (DAILY VISION — actes & heures) · Planning (date · activité · heures planifiées) · Réalisé (DRM) · DMT (Export Vonage Call) · Mail (Export Mail + Prévision Mail) — les données importées restent dans ce navigateur ; utilisez « Exporter » pour produire le data.json de déploiement.</footer>
 
 <!-- ================= DIALOG IMPORT ================= -->
 <dialog id="imp">
@@ -313,12 +292,16 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
         <p>Classeur .xlsm / .xlsx, onglet <code>AUCHAN</code> (repère <code>S1__2026</code> ligne 3).</p>
         <label>Choisir le fichier<input type="file" id="fRoad" accept=".xlsm,.xlsx,.xls"></label>
         <span class="st" id="stRoad"></span></div>
-      <div class="imp"><b>Capacité</b>
-        <p>Classeur .xlsx, onglet <code>DAILY VISION</code> (dates ligne 15, lignes « Capacitaire en actes »).</p>
+      <div class="imp"><b>ETP prévus</b>
+        <p>Colonnes <code>semaine (S42, 42 ou une date) · activité · etp</code>. Optionnel : le fichier Roadmap contient déjà les ETP (3 colonnes par activité). Alimente l'onglet Roadmap.</p>
+        <label>Choisir le fichier<input type="file" id="fEtp" accept=".xlsx,.xls,.csv"></label>
+        <span class="st" id="stEtp"></span></div>
+      <div class="imp"><b>Capacitaire</b>
+        <p>Classeur .xlsx, onglet <code>DAILY VISION</code> (dates ligne 15, lignes « Capacitaire en actes » et « Capacitaire en heures » si présentes).</p>
         <label>Choisir le fichier<input type="file" id="fCapa" accept=".xlsx,.xlsm,.xls"></label>
         <span class="st" id="stCapa"></span></div>
-      <div class="imp"><b>Planifié (+ réalisé créneaux)</b>
-        <p>Colonnes <code>date, creneau, flux, prevu, planifie, realise</code>.</p>
+      <div class="imp"><b>Planning — heures planifiées</b>
+        <p>Synthèse quotidienne : colonnes <code>date · activité · heures</code> (l'activité peut être « Hyper », « Voix Hyper »…). Alimente la capa réelle de l'onglet « Capa prévu vs Capa réel » et le taux d'occupation.</p>
         <label>Choisir le fichier<input type="file" id="fPlan" accept=".xlsx,.xls,.csv"></label>
         <span class="st" id="stPlan"></span></div>
       <div class="imp"><b>Réalisé — DRM</b>
@@ -340,7 +323,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
     </div>
   </div>
   <div class="dlgfoot">
-    <button class="btn" id="bModele">Modèle plan (.xlsx)</button>
+    <button class="btn" id="bModele">Modèle planning (.xlsx)</button>
     <span class="spacer"></span>
     <button class="btn" id="bDemo2">Charger la démo</button>
     <button class="btn pri" id="bExp2">Exporter data.json</button>
