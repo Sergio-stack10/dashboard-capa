@@ -1094,11 +1094,11 @@ function bindImports() {
     catch (err) { setStatus('stReal', 'Erreur : ' + err.message, false); }
   }));
   $('fDmt').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stDmt', impDmt(f.name, b), true); afterImport('p6'); }
+    try { setStatus('stDmt', impDmt(f.name, b), true); afterImport('p5'); }
     catch (err) { setStatus('stDmt', 'Erreur : ' + err.message, false); }
   }));
   $('fMail').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stMail', impMail(f.name, b), true); afterImport('p7'); }
+    try { setStatus('stMail', impMail(f.name, b), true); afterImport('p5'); }
     catch (err) { setStatus('stMail', 'Erreur : ' + err.message, false); }
   }));
   $('fPmail').addEventListener('change', e => readFile(e.target, (f, b) => {
