@@ -1,110 +1,134 @@
 # Dashboard capacitaire – Roadmap Auchan
 
 Application 100 % statique (HTML/CSS/JS vanilla + Chart.js + SheetJS via CDN), sans build.
-Déploiement : Cloudflare Pages (ou Workers).
+Déploiement : Cloudflare Workers (déploiement manuel ou Git integration).
 
 ## Contenu du dépôt
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Interface : 6 onglets + dialog d'import (8 sources) |
-| `js/app.js` | Logique applicative (données, imports, graphiques, filtres de période) |
-| `data/data.json` | Données intégrées : roadmap (prévisions + ETP) + capacitaire + réalisé (DRM oct. 2026) + DMT (Vonage, 1–25 oct.) + Mail (Export Mail, 1–25 oct.) |
+| `index.html` | Interface : 7 onglets + dialog d'import (9 sources) |
+| `js/app.js` | Logique applicative (données, imports, graphiques, filtres) |
+| `data/roadmap.json` | **Onglet Roadmap** : modèle RM complet (1 fichier par onglet) — 21 sections × 12 activités × 113 semaines |
+| `data/prevision.json` | **Onglet Prévision** : prévus mensuels Webhelp (12 mois × 6 flux) + poids journaliers (365 j) + créneaux 30 min (12 mois × flux × profils Lundi-samedi / Dimanche) |
+| `data/data.json` | Autres onglets : capacitaire + réalisé (DRM oct. 2026) + DMT (Vonage, 1–25 oct.) + Mail (Export Mail, 1–25 oct.) |
 | `favicon.svg` | Icône de l'outil (onglet navigateur) |
-| `_headers` | Cloudflare Pages/Workers : pas de cache (mises à jour toujours visibles) |
-| `scripts/build_data.py` | Régénère `data/data.json` : fusionne un DRM dans les données existantes |
+| `_headers` | Cloudflare : pas de cache (mises à jour toujours visibles) |
+| `scripts/build_roadmap.py` | Régénère `data/roadmap.json` depuis le modèle RM (`.xlsm`, onglet AUCHAN + feuille Congés) |
+| `scripts/build_prevision.py` | Régénère `data/prevision.json` depuis le classeur Webhelp (onglets `2026` + `Poids`) |
+| `scripts/build_data.py` | Injecte un DRM dans `data/data.json` |
 | `scripts/build_dmt.py` | Injecte un Export Vonage Call (DMT) dans `data/data.json` |
 | `scripts/build_mail.py` | Injecte un Export Mail (canal mail) dans `data/data.json` |
+| `scripts/validate_roadmap.py` | Contrôle `roadmap.json` contre les valeurs du Dashboard RM |
 
-## Les 6 onglets
+## Les 7 onglets
 
-1. **Roadmap** — prévisions de contacts par **activité** (10 activités × 52 sem.) :
-   - contacts prévisionnels par période (prévu vs capacité du fichier Roadmap) ;
-   - **ETP prévus** par semaine (colonne ETP du fichier Roadmap, ou carte d'import « ETP prévus » prioritaire) ;
-   - KPIs : prévu total, capacité Roadmap, ETP moyen / sem. (pic), écart max capa − prévu.
-2. **Capacitaire** — capacitaire journalière (275 jours) **en actes et en heures** :
-   - bascule **Unité : Actes ⇄ Heures** ; les heures proviennent du fichier CAPA
-     (lignes « Capacitaire en heures ») ou, à défaut, de la conversion
-     `actes ÷ hypothèse de productivité` ;
-   - contractuel et couverture conservés ; tableau par période ;
+1. **Roadmap** — *besoin & capacité à partir du modèle RM (S46+)*, semaine analysée + fenêtre
+   13/27 semaines ou tout, périmètre Total / Front Office / Back Office / Autres / activité :
+   - **KPIs semaine analysée** : SLA/QE (Δ vs S-1, cible), prévision finale, capacité actes
+     (couverture), heures de log (besoin + capa prod), écart ETP, effectif productif,
+     absentéisme, taux d'occupation ;
+   - **9 blocs** : ① heures (capa vs besoin, bascule log ⇄ prod) · ② actes (capa vs
+     prévision finale + initiale) · ③ ETP (besoin vs effectif productif + écart) ·
+     ④ effectif (ETP répartis + effectif saisi) · ⑤ SLA/QE vs cible avec seuils 95 %/90 % ·
+     ⑥ DMT (s, pondéré + activités masquées) · ⑦ taux d'occupation · ⑧ absentéisme ·
+     ⑨ congés (ETP feuille Congés, sinon taux) ;
+   - **détail hebdomadaire** : 20 colonnes (prévu final/init., capa actes, heures log/prod,
+     besoin ETP, effectif, écarts, QE, cible, DMT, occupation, absentéisme, congés) ;
+   - les lignes « --- » du fichier sont reconnues comme **C2E** et **Direct (LAD)** ;
+     **QE = capacité actes ÷ prévision finale** (identique au Dashboard du fichier RM) ;
+   - import : carte « Roadmap — modèle RM (S46+) » (`Copie de RM_*.xlsm`) —
+     les données RM sont lues directement dans le navigateur (SheetJS).
+2. **Prévision** — *prévus Webhelp par jour et par créneau 30 min* (classeur Webhelp,
+   onglets `2026` + `Poids`) :
+   - **KPIs du mois** : prévu du périmètre, moyenne / jour, jour le plus chargé,
+     pointe 30 min du jour choisi, répartition appels / mails ;
+   - **vue par jour** : volume = prévu du mois × poids journalier (col. B-F appels,
+     J-L mails de l'onglet `Poids`) — graphe empilé + tableau jour × flux (30 j) ;
+   - **vue par créneau 30 min** : volume = volume du jour × poids du créneau
+     (col. R, format 730 = 07:30) — profil « Lundi au samedi » ou « Dimanche (matin) »
+     selon le jour choisi (ou forcé), graphe + tableau créneau × flux avec % du jour ;
+   - **synthèse mensuelle** : 12 mois × 6 flux (appels Hyper, C2E, AFR, Drive, SAV, Direct ;
+     mails Hyper/C2E, AFR, Drive) ;
+   - sélecteurs : mois (janv. 2026 → déc. 2026) + flux (Total, Appels, Mails, ou un flux) ;
+   - import : carte « Prévision Webhelp — jour & 30 min » (`04_Webhelp_*.xlsx`).
+3. **Capacitaire** — capacitaire journalière (275 jours) **en actes et en heures** :
+   - bascule **Unité : Actes ⇄ Heures** ; heures du fichier CAPA ou conversion
+     `actes ÷ hypothèse de productivité` ; contractuel + couverture ;
    - bloc **« Hypothèses de productivité »** (actes/heure par activité, éditable, mémorisé).
-3. **Capa prévu vs Capa réel** — la capacitaire de l'onglet 2 (heures + actes) **vs la capa réelle
-   issue du Planning** (import `date · activité · heures`) :
-   - heures planifiées → capa réelle en heures ; × hypothèses de productivité → capa réelle en actes ;
-   - **réalisés fusionnés** (traités DRM en ligne du graphique « actes ») ;
-   - KPIs : capa prévue, capa réelle planning, écart, heures prévues/planifiées, réalisé (DRM) ;
-   - tableau par période avec écarts actes et heures.
-4. **Productivité** — tous les indicateurs **par canal Phone · Mail · Chat** et par activité :
-   - `QS = traités / reçus` · `QP = reçus / prévision` · `QS < 60 s` ·
-     `QE = (traités / prévision) × 92 %` si **QP > 115 %** · `T/P = traités / prévision` ;
-   - **DMT** (secondes) · **Productivité = traités / heure de traitement** ·
-     **Taux d'occupation = temps de traitement / heures planifiées** (import Planning) ;
-   - nombres : traités, reçus, prévision (Phone : Roadmap hebdo ÷ 7 · Mail : « Prévision Mail »),
-     heures de traitement ;
-   - graphiques journalier + qualité (%) + répartition par activité ; tableau jour × activité
-     (15 colonnes) avec total de période ;
-   - Phone = DRM (réalisé) + Export Vonage Call (DMT, heures) · Mail = Export Mail ·
-     Chat = source à raccordement futur (état vide explicite).
-5. **DMT** — détail Durée Moyenne de Traitement (Export Vonage Call) : par jour × activité,
-   en secondes format nombre (`300` = 5 min), communication + after-call empilés, moyennes pondérées.
-6. **Mail** — détail du canal mail (Export Mail) : indicateurs du projet + nombres (traités, reçus,
-   prévision, perdus file -50s via colonne `SLA-50` de l'Export Vonage, heures de traitement, DMT),
-   par jour × activité.
+4. **Capa prévu vs Capa réel** — capacitaire (heures + actes) **vs Planning**
+   (import `date · activité · heures`) : heures planifiées → capa réelle, × productivités →
+   actes ; réalisés DRM en ligne ; tableau par période avec écarts.
+5. **Productivité** — indicateurs **par canal Phone · Mail · Chat** et par activité :
+   `QS · QP · QS < 60 s · QE (si QP > 115 % : × 92 %) · T/P · DMT · productivité · TO`
+   + nombres (traités, reçus, prévision, heures) ; tableau jour × activité (15 colonnes).
+   Phone = DRM + Vonage · Mail = Export Mail · Chat = source à raccordement futur.
+6. **DMT** — détail Vonage par jour × activité (communication + after-call, moyennes pondérées).
+7. **Mail** — détail canal mail : QS, QP, QS < 60 s, QE, T/P + perdus file -50s (SLA-50 Vonage),
+   heures de traitement, DMT, par jour × activité.
 
-## Filtres de période
+## Filtres
 
-Chaque onglet dispose de ses propres filtres **Du / Au + préréglages** :
-Tout · Mois le plus récent · Mois précédent · 7 derniers jours · 30 derniers jours · Personnalisé.
-Sur l'onglet Roadmap (données hebdomadaires), la période retient les semaines qui intersectent l'intervalle.
+Onglets jour (3-7) : filtres **Du / Au + préréglages** (Tout · mois récent · mois précédent ·
+7 j · 30 j · personnalisé). Onglet Roadmap : **semaine analysée + fenêtre** (13/27/tout).
+Onglet Prévision : **mois + flux** et **jour + profil** pour les créneaux.
 
 ## Données & imports (bouton Importer)
 
-- **Roadmap** : `.xlsm`, onglet `AUCHAN`, repère `S1__2026` ligne 3 — 3 colonnes par activité
-  (prévu · **ETP** · capa).
-- **ETP prévus** *(nouveau)* : colonnes `semaine (S42, 42 ou une date) · activité · etp`.
-  Prioritaire sur la colonne ETP du fichier Roadmap.
-- **Capacitaire** : `.xlsx`, onglet `DAILY VISION`, dates ligne 15, lignes « Capacitaire en actes »
-  et « Capacitaire en heures » (si présentes).
-- **Planning — heures planifiées** *(nouveau)* : colonnes `date · activité · heures`
-  (l'activité peut être « Hyper », « Voix Hyper »…). Alimente la capa réelle (onglet 3)
-  et le taux d'occupation. Un modèle `.xlsx` est téléchargeable dans le dialog.
-- **Réalisé — DRM** : table journalière `SEMAINE / JOUR / DATE` + groupes `Traités · Reçus · Traités 60s`
-  × flux (HYPER, C2E, AFR, DRIVE, SAV). Chaque mois importé s'additionne (même date = valeur remplacée).
-- **DMT — Export Vonage Call** : une ligne par appel avec `Compétence · Répondu · After Call Work Time ·
-  Durée de communication · Date de création`. Colonne `SLA-50` optionnelle (perdus file -50s).
-- **Mail — Export Mail** : une ligne par courriel avec `Personnalisé · Statut · Délai de traitement ·
-  Date d'acceptation`. Statut 1 = traité.
-- **Prévision Mail** : colonnes `date · flux · prevu` — alimente QP, T/P et QE (Mail + Productivité).
+- **Roadmap — modèle RM (S46+)** : `.xlsm`, onglet `AUCHAN` (sections Besoin / Capa / Effectif /
+  SLA·QE / DMT / Occupation / Absentéisme / Congés) + feuille `Congés` → `data/roadmap.json`.
+- **Prévision Webhelp — jour & 30 min** : `.xlsx`, onglet `2026` (prévus mensuels par flux)
+  + onglet `Poids` (poids journaliers, poids par jour de semaine et créneaux 30 min,
+  col. R — format 730 = 07:30 ; profils Lundi-samedi / Dimanche par flux) → `data/prevision.json`.
+  Les poids sont normalisés (Σ = 1 par mois × flux) : la somme des jours = prévu du mois
+  et la somme des créneaux = volume du jour, à l'identique du fichier.
+- **ETP prévus** : colonnes `semaine · activité · etp` (complément).
+- **Capacitaire** : onglet `DAILY VISION`, dates ligne 15.
+- **Planning** : colonnes `date · activité · heures` (modèle téléchargeable).
+- **Réalisé — DRM** : `Traités · Reçus · Traités 60s` × flux (HYPER, C2E, AFR, DRIVE, SAV),
+  les mois s'additionnent.
+- **DMT — Export Vonage Call** / **Mail — Export Mail** / **Prévision Mail** : comme décrit
+  dans le dialog d'import.
 
-Les imports sont conservés dans le navigateur (localStorage). Le bouton **Exporter** produit le
-`data.json` complet à déposer dans `data/` pour le publier pour tous les utilisateurs.
+Les imports restent dans le navigateur (localStorage). **Exporter** produit le `data.json`
+(avec la roadmap et la prévision importées) à déposer dans `data/`.
 
-## Mise à jour mensuelle du réalisé en production
+## Mise à jour hebdomadaire du modèle RM
 
-Option A (interface) : Importer → Réalisé DRM → Exporter → remplacer `data/data.json` dans le dépôt → push.
+Option A (interface, recommandée) : Importer → **Roadmap — modèle RM** → le fichier
+`Copie de RM_Sxx.xlsm` est analysé dans le navigateur → Exporter si publication pour tous.
 
 Option B (script) :
 ```bash
-python scripts/build_data.py "chemin/112026 - DRM.xlsx" data/data.json
-git add data/data.json && git commit -m "DRM novembre" && git push
+python scripts/build_roadmap.py "chemin/Copie de RM_Auchan_S46.xlsm" data/roadmap.json
+python scripts/validate_roadmap.py          # contrôle vs Dashboard RM
+git add data/roadmap.json && git commit -m "RM S46" && git push
 ```
 
-## Mises à jour DMT / Mail / Planning en production
+## Mise à jour de la prévision Webhelp
+
+Option A (interface) : Importer → **Prévision Webhelp — jour & 30 min** → le classeur
+`04_Webhelp_*.xlsx` est analysé dans le navigateur (onglets `2026` + `Poids`).
+
+Option B (script) :
+```bash
+python scripts/build_prevision.py "chemin/04_Webhelp_2026.xlsx" data/prevision.json
+git add data/prevision.json && git commit -m "Prévision Webhelp" && git push
+```
+
+## Mise à jour mensuelle du réalisé / DMT / Mail
 
 ```bash
+python scripts/build_data.py "chemin/112026 - DRM.xlsx" data/data.json
 python scripts/build_dmt.py "chemin/Export Vonage Call.xlsx" data/data.json
 python scripts/build_mail.py "chemin/Export Mail.xlsx" data/data.json
-git add data/data.json && git commit -m "maj semaines 44" && git push
+git add data/data.json && git commit -m "maj réalisé" && git push
 ```
 
-Le Planning, les ETP et les hypothèses de productivité se mettent à jour via l'interface
-(Importer → Exporter), puis `data/data.json` est poussé dans le dépôt.
+## Déploiement Cloudflare Workers
 
-## Déploiement Cloudflare Pages / Workers
-
-1. GitHub → dépôt avec ces fichiers (racine ou sous-dossier — dans ce cas régler
-   **Build output directory** sur le nom du sous-dossier, ex. `/dashboard-capa`).
-2. Cloudflare → Workers & Pages → Create → **Connect to Git** →
-   Build command : *(vide)* · Output directory : `/` (ou `/dashboard-capa`).
-3. Chaque `git push` redéploie automatiquement ; `_headers` impose `no-cache` :
-   les mises à jour sont visibles immédiatement (sinon Ctrl+Shift+R).
+1. GitHub → dépôt `Sergio-stack10/dashboard-capa` (fichiers à la racine).
+2. Déploiement **manuel** : Workers & Pages → dashboard-capa → Deployments →
+   **New deployment → Upload assets** → glisser le dossier (ou Git integration si connectée :
+   chaque `git push` redéploie). `_headers` impose `no-cache`.
+3. URL : `https://dashboard-capa.auchan.workers.dev/`

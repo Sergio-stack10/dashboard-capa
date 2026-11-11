@@ -25,7 +25,7 @@ header.top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:
 .brand h1{font-size:17px;font-weight:700;letter-spacing:.2px}
 .brand .sub{font-size:12px;color:var(--mut)}
 #srcLine{flex:1 1 320px;font-size:12px;color:var(--mut);min-width:200px}
-.top-actions{display:flex;gap:8px}
+.top-actions{display:flex;gap:8px;flex-wrap:wrap}
 .btn{border:1px solid var(--line);background:#fff;color:var(--txt);padding:7px 14px;border-radius:10px;font-weight:600;transition:.15s}
 .btn:hover{border-color:var(--pri);color:var(--pri)}
 .btn.pri{background:var(--pri);border-color:var(--pri);color:#fff}
@@ -64,8 +64,10 @@ select,input[type=date]{border:1px solid var(--line);border-radius:9px;backgroun
 .card .hint{font-size:12px;color:var(--mut);margin:6px 0 0}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .grid2 .card{margin-bottom:14px}
+.card{min-width:0}
+.charthold{position:relative;height:300px;min-width:0}
+.charthold canvas{max-width:100%}
 @media(max-width:980px){.grid2{grid-template-columns:1fr}}
-.charthold{position:relative;height:300px}
 .charthold.tall{height:340px}
 /* ---------- tableaux ---------- */
 .tblwrap{max-height:430px;overflow:auto;border:1px solid var(--line);border-radius:10px}
@@ -125,6 +127,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 
 <nav class="tabs" role="tablist">
   <button data-p="p1" class="on">Roadmap</button>
+  <button data-p="p4">Prévision</button>
   <button data-p="p2">Capacitaire</button>
   <button data-p="p3">Capa prévu vs Capa réel</button>
   <button data-p="p5">Productivité</button>
@@ -134,21 +137,62 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 
 <main>
 
-<!-- ================= P1 : ROADMAP (prévisions + ETP) ================= -->
+<!-- ================= P1 : ROADMAP (besoin & capacité — modèle RM S46+) ================= -->
 <section id="p1" class="page on">
   <div class="toolbar">
-    <div class="grp"><label>Activité</label><select id="w1Act"></select></div>
-    <div class="grp"><label>Du</label><input type="date" id="d1A"></div>
-    <div class="grp"><label>Au</label><input type="date" id="d1B"></div>
-    <div class="grp"><label>Période</label><select id="d1P">
-      <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
-      <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
+    <div class="grp"><label>Périmètre</label><select id="w1P"></select></div>
+    <div class="grp"><label>Semaine analysée</label><select id="w1W"></select></div>
+    <div class="grp"><label>Fenêtre</label><select id="w1F">
+      <option value="13" selected>13 semaines</option><option value="27">27 semaines</option><option value="all">Tout</option></select></div>
+    <div class="grp"><label>Unité heures</label><select id="s1U">
+      <option value="log" selected>Heures de log</option><option value="prod">Heures de prod</option></select></div>
     <div class="src" id="w1Src"></div>
   </div>
   <div class="kpis" id="k1"></div>
   <div class="grid2">
-    <div class="card"><h3>Contacts prévisionnels par activité — par semaine</h3><div class="charthold"><canvas id="c1a"></canvas></div></div>
-    <div class="card"><h3>ETP prévus — par semaine</h3><div class="charthold"><canvas id="c1b"></canvas></div></div>
+    <div class="card"><h3>1 · Heures — capacité vs besoin</h3><div class="charthold"><canvas id="c1a"></canvas></div></div>
+    <div class="card"><h3>2 · Actes — capacité vs prévision finale</h3><div class="charthold"><canvas id="c1b"></canvas></div></div>
+    <div class="card"><h3>3 · ETP — besoin vs effectif productif</h3><div class="charthold"><canvas id="c1c"></canvas></div></div>
+    <div class="card"><h3>4 · Effectif</h3><div class="charthold"><canvas id="c1d"></canvas></div></div>
+    <div class="card"><h3>5 · SLA / QE vs cible</h3><div class="charthold"><canvas id="c1e"></canvas></div></div>
+    <div class="card"><h3>6 · DMT — secondes</h3><div class="charthold"><canvas id="c1f"></canvas></div></div>
+    <div class="card"><h3>7 · Taux d'occupation</h3><div class="charthold"><canvas id="c1g"></canvas></div></div>
+    <div class="card"><h3>8 · Absentéisme</h3><div class="charthold"><canvas id="c1h"></canvas></div></div>
+  </div>
+  <div class="card"><h3>9 · Congés — ETP par semaine</h3><div class="charthold"><canvas id="c1i"></canvas></div></div>
+  <div class="card"><h3>Détail hebdomadaire — <span id="t1Per">Total</span></h3>
+    <div class="tblwrap"><table id="t1"></table></div>
+    <p class="hint" id="h1"></p></div>
+</section>
+
+<!-- ================= P4 : PRÉVISION (Webhelp — par jour & créneaux 30 min) ================= -->
+<section id="p4" class="page">
+  <div class="toolbar">
+    <div class="grp"><label>Mois</label><select id="w4M"></select></div>
+    <div class="grp"><label>Flux</label><select id="w4F"></select></div>
+    <div class="src" id="w4Src"></div>
+  </div>
+  <div id="p4body">
+    <div class="kpis" id="k4"></div>
+    <div class="grid2">
+      <div class="card"><h3>Prévision par jour — <span id="t4a">—</span></h3>
+        <div class="charthold"><canvas id="c4a"></canvas></div><p class="hint" id="h4a"></p></div>
+      <div class="card"><h3>Prévision par créneau 30 min — <span id="t4b">—</span></h3>
+        <div class="toolbar" style="margin-bottom:8px">
+          <div class="grp"><label>Jour</label><input type="date" id="w4D"></div>
+          <div class="grp"><label>Profil</label><select id="w4P">
+            <option value="auto" selected>Auto (selon le jour)</option><option value="ls">Lundi au samedi</option><option value="dim">Dimanche</option></select></div>
+        </div>
+        <div class="charthold"><canvas id="c4b"></canvas></div><p class="hint" id="h4b"></p></div>
+    </div>
+    <div class="card"><h3>Détail par jour — <span id="t4c">—</span></h3><div class="tblwrap"><table id="ta4"></table></div></div>
+    <div class="card"><h3>Détail par créneau — <span id="t4d">—</span></h3><div class="tblwrap"><table id="tb4"></table></div></div>
+    <div class="card"><h3>Synthèse mensuelle — prévus par flux</h3><div class="tblwrap"><table id="tm4"></table></div>
+      <p class="hint" id="h4m"></p></div>
+  </div>
+  <div class="card empty" id="p4empty" style="display:none">
+    <b>Aucune prévision Webhelp.</b><br>Importez le classeur Webhelp (.xlsx — onglets <code>2026</code> + <code>Poids</code>) via le bouton <b>Importer</b> :
+    prévus mensuels par flux, poids journaliers (vue par jour) et créneaux 30 min (colonne R, format 730 = 07:30 — vue par créneau).
   </div>
 </section>
 
@@ -281,19 +325,19 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 
 </main>
 
-<footer class="pfoot">Sources : Roadmap (.xlsm — prévisions contacts + ETP) · Capacitaire (DAILY VISION — actes & heures) · Planning (date · activité · heures planifiées) · Réalisé (DRM) · DMT (Export Vonage Call) · Mail (Export Mail + Prévision Mail) — les données importées restent dans ce navigateur ; utilisez « Exporter » pour produire le data.json de déploiement.</footer>
+<footer class="pfoot">Sources : modèle RM (.xlsm — besoin &amp; capacité, SLA/QE, DMT, occupation, absentéisme, congés) · Prévision Webhelp (prévus mensuels + poids journaliers &amp; créneaux 30 min) · Capacitaire (DAILY VISION) · Planning (heures planifiées) · Réalisé (DRM) · DMT (Export Vonage Call) · Mail (Export Mail + Prévision Mail) — les données importées restent dans ce navigateur ; utilisez « Exporter » pour produire le data.json de déploiement.</footer>
 
 <!-- ================= DIALOG IMPORT ================= -->
 <dialog id="imp">
   <div class="dlghead"><h2>Importer les fichiers sources</h2><button class="x" id="bImpClose" aria-label="Fermer">✕</button></div>
   <div class="dlgbody">
     <div class="impgrid">
-      <div class="imp"><b>Roadmap</b>
-        <p>Classeur .xlsm / .xlsx, onglet <code>AUCHAN</code> (repère <code>S1__2026</code> ligne 3).</p>
+      <div class="imp"><b>Roadmap — modèle RM (S46+)</b>
+        <p>Classeur .xlsm / .xlsx, onglet <code>AUCHAN</code> (sections Besoin / Capa / Effectif / SLA · QE / DMT / Occupation / Absentéisme / Congés). Alimente les 9 blocs de l'onglet Roadmap.</p>
         <label>Choisir le fichier<input type="file" id="fRoad" accept=".xlsm,.xlsx,.xls"></label>
         <span class="st" id="stRoad"></span></div>
       <div class="imp"><b>ETP prévus</b>
-        <p>Colonnes <code>semaine (S42, 42 ou une date) · activité · etp</code>. Optionnel : le fichier Roadmap contient déjà les ETP (3 colonnes par activité). Alimente l'onglet Roadmap.</p>
+        <p>Colonnes <code>semaine (S42, 42 ou une date) · activité · etp</code>. Optionnel : le modèle RM contient déjà le besoin en ETP. Complète l'onglet Roadmap.</p>
         <label>Choisir le fichier<input type="file" id="fEtp" accept=".xlsx,.xls,.csv"></label>
         <span class="st" id="stEtp"></span></div>
       <div class="imp"><b>Capacitaire</b>
@@ -320,6 +364,12 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
         <p>Colonnes <code>date · flux · prevu</code> (ou « prévision »). Alimente QP, T/P et QE de l'onglet Mail.</p>
         <label>Choisir le fichier<input type="file" id="fPmail" accept=".xlsx,.xls,.csv"></label>
         <span class="st" id="stPmail"></span></div>
+      <div class="imp"><b>Prévision Webhelp — jour &amp; 30 min (nouveau)</b>
+        <p>Classeur .xlsx : onglet <code>2026</code> (prévus mensuels par flux) + onglet <code>Poids</code> (poids journaliers,
+        poids par jour de semaine et créneaux 30 min — colonne R, format 730 = 07:30). Alimente les vues par jour
+        et par créneau de l'onglet Prévision.</p>
+        <label>Choisir le fichier<input type="file" id="fPrev" accept=".xlsx,.xlsm,.xls"></label>
+        <span class="st" id="stPrev"></span></div>
     </div>
   </div>
   <div class="dlgfoot">
