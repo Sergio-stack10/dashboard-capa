@@ -7,10 +7,11 @@ Déploiement : Cloudflare Workers (déploiement manuel ou Git integration).
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Interface : 7 onglets + dialog d'import (9 sources) |
-| `js/app.js` | Logique applicative (données, imports, graphiques, filtres) |
+| `index.html` | Interface : 6 onglets + barre de filtres globale + dialog d'import (10 sources) |
+| `js/app.js` | Logique applicative (données, imports, graphiques, filtres globaux) |
 | `data/roadmap.json` | **Onglet Roadmap** : modèle RM complet (1 fichier par onglet) — 21 sections × 12 activités × 113 semaines |
 | `data/prevision.json` | **Onglet Prévision** : prévus mensuels Webhelp (12 mois × 6 flux) + poids journaliers (365 j) + créneaux 30 min (12 mois × flux × profils Lundi-samedi / Dimanche) |
+| `data/planning.json` | **Onglet Planification** : feuille Planning du classeur `Planning AUCHAN.xlsx` (10 jours, 80 agents) — personnes planifiées par jour et par créneau 30 min, hors FIM / pause repas / allaitement |
 | `data/data.json` | Autres onglets : capacitaire + réalisé (DRM oct. 2026) + DMT (Vonage, 1–25 oct.) + Mail (Export Mail, 1–25 oct.) |
 | `favicon.svg` | Icône de l'outil (onglet navigateur) |
 | `_headers` | Cloudflare : pas de cache (mises à jour toujours visibles) |
@@ -21,10 +22,21 @@ Déploiement : Cloudflare Workers (déploiement manuel ou Git integration).
 | `scripts/build_mail.py` | Injecte un Export Mail (canal mail) dans `data/data.json` |
 | `scripts/validate_roadmap.py` | Contrôle `roadmap.json` contre les valeurs du Dashboard RM |
 
-## Les 7 onglets
+## Les 6 onglets — avec la même barre de filtres partout
+
+**Filtres globaux (au-dessus de chaque onglet)** : Granularité (Jour / Semaine / Mois) ·
+**Flux** (multi : Front office / Back office / Autres) · **Channel** (multi : PHONE / MAIL / CHAT) ·
+**Activités** (multi : Hyper, C2E, AFR, Drive, SAV, Direct, Chat, Borne/LSA) · **Période**
+(préréglages : Tout · mois récent · mois précédent · 7 j · 30 j · personnalisé) ·
+**Intervalle de période** (du / au). Structure : Front office = PHONE (Hyper, C2E, AFR, Drive, SAV, Direct) ·
+Back office = MAIL (Hyper, AFR, Drive) · Autres = CHAT. La sélection Flux restreint les Channels
+possibles, qui restreignent les Activités possibles (cascade). Les filtres sont mémorisés d'un onglet
+à l'autre et d'une session à l'autre ; ils sont grisés quand ils ne s'appliquent pas
+(Roadmap = hebdo, Prévision = mensuel, Planification = agents).
 
 1. **Roadmap** — *besoin & capacité à partir du modèle RM (S46+)*, semaine analysée + fenêtre
-   13/27 semaines ou tout, périmètre Total / Front Office / Back Office / Autres / activité :
+   13/27 semaines ou tout, périmètre piloté par les filtres globaux (somme ou moyenne pondérée
+   des activités retenues) :
    - **KPIs semaine analysée** : SLA/QE (Δ vs S-1, cible), prévision finale, capacité actes
      (couverture), heures de log (besoin + capa prod), écart ETP, effectif productif,
      absentéisme, taux d'occupation ;
@@ -52,26 +64,39 @@ Déploiement : Cloudflare Workers (déploiement manuel ou Git integration).
      mails Hyper/C2E, AFR, Drive) ;
    - sélecteurs : mois (janv. 2026 → déc. 2026) + flux (Total, Appels, Mails, ou un flux) ;
    - import : carte « Prévision Webhelp — jour & 30 min » (`04_Webhelp_*.xlsx`).
-3. **Capacitaire** — capacitaire journalière (275 jours) **en actes et en heures** :
-   - bascule **Unité : Actes ⇄ Heures** ; heures du fichier CAPA ou conversion
-     `actes ÷ hypothèse de productivité` ; contractuel + couverture ;
-   - bloc **« Hypothèses de productivité »** (actes/heure par activité, éditable, mémorisé).
+3. **Capacitaire** — capacitaire journalière (546 jours) **en actes et en heures** :
+   bascule **Unité : Actes ⇄ Heures** ; heures du fichier CAPA ou conversion
+   `actes ÷ hypothèse de productivité` ; **Prévu = prévision Webhelp × poids journaliers**
+   (répartition journalière pondérée par la prev ; repli sur le prévu du fichier capacitaire) ;
+   contractuel + couverture ; bloc **« Hypothèses de productivité »** (actes/heure par activité,
+   éditable, mémorisé).
 4. **Capa prévu vs Capa réel** — capacitaire (heures + actes) **vs Planning**
    (import `date · activité · heures`) : heures planifiées → capa réelle, × productivités →
    actes ; réalisés DRM en ligne ; tableau par période avec écarts.
-5. **Productivité** — indicateurs **par canal Phone · Mail · Chat** et par activité :
+5. **Productivité** — **une section par canal retenu dans les filtres globaux** (Phone et/ou Mail,
+   Chat tant que non raccordé) : par activité
    `QS · QP · QS < 60 s · QE (si QP > 115 % : × 92 %) · T/P · DMT · productivité · TO`
-   + nombres (traités, reçus, prévision, heures) ; tableau jour × activité (15 colonnes).
-   Phone = DRM + Vonage · Mail = Export Mail · Chat = source à raccordement futur.
-6. **DMT** — détail Vonage par jour × activité (communication + after-call, moyennes pondérées).
-7. **Mail** — détail canal mail : QS, QP, QS < 60 s, QE, T/P + perdus file -50s (SLA-50 Vonage),
-   heures de traitement, DMT, par jour × activité.
+   + nombres (traités, reçus, prévision, heures) ; tableau jour × activité (15 colonnes) ;
+   prévision Phone = Webhelp × poids journaliers (repli Roadmap hebdo ÷ 7), prévision Mail = import dédié.
+6. **Planification** — *personnes planifiées par jour et par créneau 30 min* à partir de la
+   feuille `Planning` du classeur `Planning AUCHAN.xlsx` (une ligne = agent × jour) :
+   - **règles** : lignes Statut = Planifié uniquement ; **FIM** (Compétences = FIM ou
+     Total FIM = HP) = personnes hors prod, comptées à part ; **pause repas** exclue des
+     créneaux (fenêtre exacte Début/Fin Pause Repas) ; **allaitement** déduit au prorata
+     du shift (facteur (HP − allaitement) / HP) ; HP du fichier = shift − pause repas ;
+     heures en prod = HP − Total FIM − Allaitement ;
+   - **KPIs** : agents planifiés, personnes planifiées / jour (dont FIM), HP, heures en prod,
+     pointe (moyenne période ou jour précis) ;
+   - **graphiques** : personnes par jour (prod + FIM + heures en prod), personnes par créneau
+     30 min (moyenne période ou jour précis au choix), heures par jour (prod / FIM / allaitement + HP) ;
+   - **tableaux** : détail par jour (planifiés, dont FIM, HP, pause repas, prod, FIM, allaitement)
+     et **matrice créneau × jour** (personnes planifiées en prod, moyenne / jour) ;
+   - import : carte « Planification — agents & créneaux » (feuille `Planning`) ;
+     les données 01/11 → 10/11/2026 du fichier reçu sont préchargées dans `data/planning.json`.
 
-## Filtres
-
-Onglets jour (3-7) : filtres **Du / Au + préréglages** (Tout · mois récent · mois précédent ·
-7 j · 30 j · personnalisé). Onglet Roadmap : **semaine analysée + fenêtre** (13/27/tout).
-Onglet Prévision : **mois + flux** et **jour + profil** pour les créneaux.
+> Les onglets **DMT** et **Mail** ont été retirés : les imports correspondants restent disponibles
+> et alimentent l'onglet Productivité (Phone = DRM + Export Vonage Call, Mail = Export Mail +
+> Prévision Mail).
 
 ## Données & imports (bouton Importer)
 
@@ -84,7 +109,10 @@ Onglet Prévision : **mois + flux** et **jour + profil** pour les créneaux.
   et la somme des créneaux = volume du jour, à l'identique du fichier.
 - **ETP prévus** : colonnes `semaine · activité · etp` (complément).
 - **Capacitaire** : onglet `DAILY VISION`, dates ligne 15.
-- **Planning** : colonnes `date · activité · heures` (modèle téléchargeable).
+- **Planning (heures)** : colonnes `date · activité · heures` (modèle téléchargeable).
+- **Planification — agents & créneaux** : `.xlsx`, feuille `Planning` (Statut, Nice IEX,
+  Shift In/Out, Début/Fin Pause Repas, HP, Allaitement, Total FIM, Compétences) →
+  `data/planning.json` ; même jour/agent = remplacé.
 - **Réalisé — DRM** : `Traités · Reçus · Traités 60s` × flux (HYPER, C2E, AFR, DRIVE, SAV),
   les mois s'additionnent.
 - **DMT — Export Vonage Call** / **Mail — Export Mail** / **Prévision Mail** : comme décrit

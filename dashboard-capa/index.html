@@ -110,6 +110,17 @@ dialog#imp::backdrop{background:rgba(27,36,64,.45)}
 .empty b{color:var(--txt)}
 .relnote{font-size:12px;color:var(--mut);margin:8px 0 0}
 footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
+/* ---------- barre de filtres globale ---------- */
+.gbar{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;padding:12px 20px;background:#fff;border-bottom:1px solid var(--line);box-shadow:0 1px 6px rgba(27,36,64,.04)}
+.gbar .grp{gap:5px}
+.gbar select{min-width:120px}
+.gbar input[type=date]{min-width:135px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;max-width:560px}
+.chipbtn{border:1px solid var(--line);background:#fff;color:var(--mut);border-radius:99px;padding:5px 13px;font-size:12.5px;font-weight:600;transition:.15s}
+.chipbtn:hover{border-color:var(--pri);color:var(--pri)}
+.chipbtn.on{background:var(--pri);border-color:var(--pri);color:#fff}
+.grp.dis{opacity:.4;pointer-events:none}
+.gnote{flex-basis:100%;font-size:11.5px;color:var(--mut);margin-top:-4px}
 </style>
 </head>
 <body>
@@ -131,16 +142,28 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   <button data-p="p2">Capacitaire</button>
   <button data-p="p3">Capa prévu vs Capa réel</button>
   <button data-p="p5">Productivité</button>
-  <button data-p="p6">DMT</button>
-  <button data-p="p7">Mail</button>
+  <button data-p="p8">Planification</button>
 </nav>
+
+<!-- ================= FILTRES GLOBAUX (communs à tous les onglets) ================= -->
+<div class="gbar" id="gBar">
+  <div class="grp" id="gfGW"><label>Granularité</label><select id="gG">
+    <option value="jour">Jour</option><option value="semaine">Semaine</option><option value="mois">Mois</option></select></div>
+  <div class="grp" id="gfFW"><label>Flux</label><div class="chips" id="gfFlux"></div></div>
+  <div class="grp" id="gfCW"><label>Channel</label><div class="chips" id="gfChan"></div></div>
+  <div class="grp" id="gfAW"><label>Activités</label><div class="chips" id="gfActs"></div></div>
+  <div class="grp" id="gfPW"><label>Période</label><select id="gP">
+    <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
+    <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
+  <div class="grp" id="gfIW"><label>Intervalle — du / au</label>
+    <div style="display:flex;gap:6px"><input type="date" id="gDa" title="Début de l'intervalle"><input type="date" id="gDb" title="Fin de l'intervalle"></div></div>
+</div>
 
 <main>
 
 <!-- ================= P1 : ROADMAP (besoin & capacité — modèle RM S46+) ================= -->
 <section id="p1" class="page on">
   <div class="toolbar">
-    <div class="grp"><label>Périmètre</label><select id="w1P"></select></div>
     <div class="grp"><label>Semaine analysée</label><select id="w1W"></select></div>
     <div class="grp"><label>Fenêtre</label><select id="w1F">
       <option value="13" selected>13 semaines</option><option value="27">27 semaines</option><option value="all">Tout</option></select></div>
@@ -169,7 +192,6 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 <section id="p4" class="page">
   <div class="toolbar">
     <div class="grp"><label>Mois</label><select id="w4M"></select></div>
-    <div class="grp"><label>Flux</label><select id="w4F"></select></div>
     <div class="src" id="w4Src"></div>
   </div>
   <div id="p4body">
@@ -199,16 +221,8 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 <!-- ================= P2 : CAPACITAIRE (actes & heures) ================= -->
 <section id="p2" class="page">
   <div class="toolbar">
-    <div class="grp"><label>Granularité</label><select id="s2G">
-      <option value="jour">Jour</option><option value="semaine">Semaine</option><option value="mois">Mois</option></select></div>
     <div class="grp"><label>Unité</label><select id="s2U">
       <option value="a" selected>Actes</option><option value="h">Heures</option></select></div>
-    <div class="grp"><label>Activité</label><select id="s2F"></select></div>
-    <div class="grp"><label>Du</label><input type="date" id="d2A"></div>
-    <div class="grp"><label>Au</label><input type="date" id="d2B"></div>
-    <div class="grp"><label>Période</label><select id="d2P">
-      <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
-      <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
     <div class="src" id="w2Src"></div>
   </div>
   <div class="kpis" id="k2"></div>
@@ -223,14 +237,6 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 <!-- ================= P3 : CAPA PRÉVU VS CAPA RÉEL ================= -->
 <section id="p3" class="page">
   <div class="toolbar">
-    <div class="grp"><label>Granularité</label><select id="s3G">
-      <option value="mois">Mois</option><option value="semaine">Semaine</option><option value="jour">Jour</option></select></div>
-    <div class="grp"><label>Activité</label><select id="s3F"></select></div>
-    <div class="grp"><label>Du</label><input type="date" id="d3A"></div>
-    <div class="grp"><label>Au</label><input type="date" id="d3B"></div>
-    <div class="grp"><label>Période</label><select id="d3P">
-      <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
-      <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
     <div class="src" id="w3Src"></div>
   </div>
   <div class="kpis" id="k3"></div>
@@ -242,90 +248,46 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   <div class="card"><p class="hint" id="p3Hint"></p></div>
 </section>
 
-<!-- ================= P5 : PRODUCTIVITÉ (Phone / Mail / Chat) ================= -->
+<!-- ================= P5 : PRODUCTIVITÉ (sections par canal : Phone / Mail / Chat) ================= -->
 <section id="p5" class="page">
   <div class="toolbar">
-    <div class="grp"><label>Canal</label><select id="s5C">
-      <option value="phone" selected>Phone</option><option value="mail">Mail</option><option value="chat">Chat</option></select></div>
-    <div class="grp"><label>Activité</label><select id="s5F"></select></div>
-    <div class="grp"><label>Du</label><input type="date" id="d5A"></div>
-    <div class="grp"><label>Au</label><input type="date" id="d5B"></div>
-    <div class="grp"><label>Période</label><select id="d5P">
-      <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
-      <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
     <div class="src" id="w5Src"></div>
   </div>
-  <div id="p5body">
-    <div class="kpis" id="k5"></div>
-    <div class="kpis" id="k5b"></div>
-    <div class="grid2">
-      <div class="card"><h3>Journalier — reçus / traités / prévision</h3><div class="charthold tall"><canvas id="c5a"></canvas></div></div>
-      <div class="card"><h3>Qualité journalière — QS · QS &lt; 60 s · QP · T/P</h3><div class="charthold tall"><canvas id="c5b"></canvas></div></div>
-    </div>
-    <div class="card"><h3>Répartition par activité — traités de la période</h3><div class="charthold"><canvas id="c5c"></canvas></div></div>
-    <div class="card"><h3>Détail jour × activité — tous les indicateurs</h3>
-      <div class="tblwrap"><table id="t5"></table></div></div>
-  </div>
+  <div id="p5body"></div>
   <div class="card empty" id="p5empty" style="display:none">
     <b id="p5emptyT"></b><br><span id="p5emptyS"></span>
   </div>
 </section>
 
-<!-- ================= P6 : DMT (Export Vonage Call) ================= -->
-<section id="p6" class="page">
+<!-- ================= P8 : PLANIFICATION (feuille Planning — personnes par jour & créneaux 30 min) ================= -->
+<section id="p8" class="page">
   <div class="toolbar">
-    <div class="grp"><label>Du</label><input type="date" id="d6A"></div>
-    <div class="grp"><label>Au</label><input type="date" id="d6B"></div>
-    <div class="grp"><label>Période</label><select id="d6P">
-      <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
-      <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
-    <div class="grp"><label>Activité</label><select id="s6F"></select></div>
-    <div class="src" id="w6Src"></div>
+    <div class="grp"><label>Vue créneaux</label><select id="w8V">
+      <option value="moy" selected>Moyenne période</option><option value="jour">Jour précis</option></select></div>
+    <div class="grp"><label>Jour (créneaux)</label><input type="date" id="w8D"></div>
+    <div class="src" id="w8Src"></div>
   </div>
-  <div id="p6body">
-    <div class="kpis" id="k6"></div>
+  <div id="p8body">
+    <div class="kpis" id="k8"></div>
     <div class="grid2">
-      <div class="card"><h3>DMT par jour — par activité</h3><div class="charthold tall"><canvas id="c6a"></canvas></div></div>
-      <div class="card"><h3>DMT moyen par activité — communication + after-call</h3><div class="charthold tall"><canvas id="c6b"></canvas></div></div>
+      <div class="card"><h3>1 · Personnes planifiées par jour — prod &amp; FIM hors prod</h3><div class="charthold"><canvas id="c8a"></canvas></div></div>
+      <div class="card"><h3>2 · Personnes planifiées par créneau 30 min</h3><div class="charthold"><canvas id="c8b"></canvas></div></div>
     </div>
-    <div class="card"><h3>DMT par jour × activité (secondes)</h3><div class="tblwrap"><table id="t6"></table></div></div>
+    <div class="card"><h3>3 · Heures par jour — planifiées (HP) · en prod · FIM · allaitement</h3><div class="charthold tall"><canvas id="c8c"></canvas></div></div>
+    <div class="card"><h3>Détail par jour</h3><div class="tblwrap"><table id="t8"></table></div>
+      <p class="hint" id="h8"></p></div>
+    <div class="card"><h3>Matrice — personnes planifiées (prod) par créneau 30 min</h3><div class="tblwrap"><table id="t8m"></table></div></div>
   </div>
-  <div class="card empty" id="p6empty" style="display:none">
-    <b>Aucune donnée DMT.</b><br>Importez un « Export Vonage Call » (.xlsx, une ligne par appel) via le bouton <b>Importer</b> :
-    la DMT = (durée de communication + after-call work) ÷ appels répondus, par jour et par activité.
-  </div>
-</section>
-
-<!-- ================= P7 : MAIL (Export Mail) ================= -->
-<section id="p7" class="page">
-  <div class="toolbar">
-    <div class="grp"><label>Du</label><input type="date" id="d7A"></div>
-    <div class="grp"><label>Au</label><input type="date" id="d7B"></div>
-    <div class="grp"><label>Période</label><select id="d7P">
-      <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
-      <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
-    <div class="grp"><label>Activité</label><select id="s7F"></select></div>
-    <div class="src" id="w7Src"></div>
-  </div>
-  <div id="p7body">
-    <div class="kpis" id="k7"></div>
-    <div class="kpis" id="k7b"></div>
-    <div class="grid2">
-      <div class="card"><h3>Journalier — reçus / traités / prévision</h3><div class="charthold tall"><canvas id="c7a"></canvas></div></div>
-      <div class="card"><h3>Qualité journalière — QS · QS &lt; 60 s · QP · T/P</h3><div class="charthold tall"><canvas id="c7b"></canvas></div></div>
-    </div>
-    <div class="card"><h3>Détail jour × activité — indicateurs du projet</h3><div class="tblwrap"><table id="t7"></table></div></div>
-  </div>
-  <div class="card empty" id="p7empty" style="display:none">
-    <b>Aucune donnée Mail.</b><br>Importez un « Export Mail » (.xlsx, une ligne par courriel :
-    <code>Personnalisé · Statut · Délai de traitement · Date d'acceptation</code>) via le bouton <b>Importer</b>.
-    La prévision (QP, T/P, QE) s'alimente avec la carte « Prévision Mail » (<code>date · flux · prevu</code>).
+  <div class="card empty" id="p8empty" style="display:none">
+    <b>Aucune planification.</b><br>Importez le classeur Planning (.xlsx, feuille <code>Planning</code> — Statut, Nice IEX, Shift In/Out,
+    Pause repas, HP, Allaitement, Total FIM) via le bouton <b>Importer</b> : personnes planifiées par jour et par créneau 30 min,
+    hors FIM (hors prod), hors pause repas et hors allaitement. Les données du fichier du 01/11 au 10/11/2026 sont préchargées.
   </div>
 </section>
 
 </main>
 
-<footer class="pfoot">Sources : modèle RM (.xlsm — besoin &amp; capacité, SLA/QE, DMT, occupation, absentéisme, congés) · Prévision Webhelp (prévus mensuels + poids journaliers &amp; créneaux 30 min) · Capacitaire (DAILY VISION) · Planning (heures planifiées) · Réalisé (DRM) · DMT (Export Vonage Call) · Mail (Export Mail + Prévision Mail) — les données importées restent dans ce navigateur ; utilisez « Exporter » pour produire le data.json de déploiement.</footer>
+<footer class="pfoot">Sources : modèle RM (.xlsm — besoin &amp; capacité, SLA/QE, DMT, occupation, absentéisme, congés) · Prévision Webhelp (prévus mensuels + poids journaliers &amp; créneaux 30 min) · Capacitaire (DAILY VISION) · Planning heures (date · activité · heures) · Planification (feuille Planning — agents par jour &amp; créneaux) · Réalisé (DRM) · DMT (Export Vonage Call) · Mail (Export Mail + Prévision Mail) — les données importées restent dans ce navigateur ; utilisez « Exporter » pour produire le data.json de déploiement.</footer>
 
 <!-- ================= DIALOG IMPORT ================= -->
 <dialog id="imp">
@@ -361,9 +323,14 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
         <label>Choisir le fichier<input type="file" id="fMail" accept=".xlsx,.xls"></label>
         <span class="st" id="stMail"></span></div>
       <div class="imp"><b>Prévision Mail</b>
-        <p>Colonnes <code>date · flux · prevu</code> (ou « prévision »). Alimente QP, T/P et QE de l'onglet Mail.</p>
+        <p>Colonnes <code>date · flux · prevu</code> (ou « prévision »). Alimente QP, T/P et QE de l'onglet Productivité (canal Mail).</p>
         <label>Choisir le fichier<input type="file" id="fPmail" accept=".xlsx,.xls,.csv"></label>
         <span class="st" id="stPmail"></span></div>
+      <div class="imp"><b>Planification — agents &amp; créneaux (nouveau)</b>
+        <p>Classeur .xlsx, feuille <code>Planning</code> (une ligne = agent × jour : Statut, Nice IEX, Shift In/Out, Pause repas, HP, Allaitement, Total FIM).
+        Calcule les personnes planifiées par jour et par créneau 30 min — hors FIM (hors prod), hors pause repas et hors allaitement. Alimente l'onglet Planification.</p>
+        <label>Choisir le fichier<input type="file" id="fPlanA" accept=".xlsx,.xlsm,.xls"></label>
+        <span class="st" id="stPlanA"></span></div>
       <div class="imp"><b>Prévision Webhelp — jour &amp; 30 min (nouveau)</b>
         <p>Classeur .xlsx : onglet <code>2026</code> (prévus mensuels par flux) + onglet <code>Poids</code> (poids journaliers,
         poids par jour de semaine et créneaux 30 min — colonne R, format 730 = 07:30). Alimente les vues par jour

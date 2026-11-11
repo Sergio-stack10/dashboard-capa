@@ -1,10 +1,14 @@
 'use strict';
 /* =====================================================================
    Dashboard capacitaire – Roadmap Auchan
-   Données : localStorage « capaData » sinon data/data.json (+ data/roadmap.json + data/prevision.json)
+   Données : localStorage « capaData » sinon data/data.json (+ data/roadmap.json + data/prevision.json + data/planning.json)
    Onglets : p1 Roadmap (besoin & capacité — modèle RM S46+) · p4 Prévision (Webhelp — jour & 30 min) ·
-             p2 Capacitaire (actes & heures) · p3 Capa prévu vs Capa réel (planning) ·
-             p5 Productivité (Phone/Mail/Chat) · p6 DMT (Vonage) · p7 Mail (Export Mail)
+             p2 Capacitaire (actes & heures, répartition journalière pondérée par la prévision) ·
+             p3 Capa prévu vs Capa réel (planning) · p5 Productivité (sections Phone/Mail/Chat) ·
+             p8 Planification (feuille Planning — personnes par jour & créneaux 30 min)
+   Filtres globaux (tous les onglets) : Granularité · Flux (FO/BO/Autres, multi) ·
+   Channel (PHONE/MAIL/CHAT, multi) · Activités (multi) · Période · Intervalle de période.
+   Structure : Front office = PHONE (Hyper, C2E, AFR, Drive, SAV, Direct) · Back office = MAIL (Hyper, AFR, Drive) · Autres = CHAT.
    ===================================================================== */
 
 /* ---------- constantes ---------- */
@@ -15,6 +19,107 @@ const PAL   = ['#3b5bdb','#0ca678','#f59f00','#7048e8','#e8590c','#1098ad','#d63
 const FLOWS8 = ['Voix Hyper','Voix C2E','Voix AFR','Voix Drive','Voix SAV','Mail Hyper','Mail AFR','Mail Drive'];
 const MOIS  = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 const JJ    = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+
+/* ---------- filtres globaux (communs à tous les onglets) ----------
+   Flux : FO / BO / AU — Channel : PHONE / MAIL / CHAT — Activités : base (Hyper, AFR, …)
+   Cascade : Flux -> Channels possibles -> Activités possibles ; sélection multi par chips. */
+const FLUX_CH  = { FO: ['PHONE'], BO: ['MAIL'], AU: ['CHAT'] };
+const FLUX_LBL = { FO: 'Front office', BO: 'Back office', AU: 'Autres' };
+const CH_ACTS  = { PHONE: ['Hyper', 'C2E', 'AFR', 'Drive', 'SAV', 'Direct'],
+                   MAIL: ['Hyper', 'AFR', 'Drive'], CHAT: ['Chat', 'Borne/LSA'] };
+const ACT_CAP  = { hyper: 'Hyper', c2e: 'C2E', afr: 'AFR', drive: 'Drive', sav: 'SAV', direct: 'Direct' };
+const GF_LS = 'capaGF';
+let GF = { g: 'jour', flux: [], chan: [], acts: [], per: 'all', a: '', b: '' };
+function gfLoad() { try { const s = JSON.parse(localStorage.getItem(GF_LS)); if (s && typeof s === 'object') GF = Object.assign(GF, s); } catch (e) {} }
+function gfSave() { try { localStorage.setItem(GF_LS, JSON.stringify(GF)); } catch (e) {} }
+function effFluxSet() { return new Set(GF.flux.length ? GF.flux : Object.keys(FLUX_CH)); }
+function effChanSet() {
+  const allow = new Set();
+  effFluxSet().forEach(f => (FLUX_CH[f] || []).forEach(c => allow.add(c)));
+  return new Set(GF.chan.length ? GF.chan.filter(c => allow.has(c)) : [...allow]);
+}
+function chanOfAct(a) { const s = norm(a);
+  if (s.includes('mail')) return 'MAIL';
+  if (s.includes('chat')) return 'CHAT';
+  if (s.includes('borne') || s.includes('lsa')) return 'CHAT';
+  return 'PHONE'; }
+function actKeyOf(a) { const s = norm(a);
+  if (s.includes('borne') || s.includes('lsa')) return 'Borne/LSA';
+  if (s.includes('chat')) return 'Chat';
+  for (const x in ACT_CAP) if (s.includes(x)) return ACT_CAP[x];
+  return String(a).trim(); }
+function gfPass(a, chanHint) {                       // une activité passe-t-elle les filtres globaux ?
+  if (!a) return true;
+  const ch = chanHint || chanOfAct(a);
+  if (!effChanSet().has(ch)) return false;
+  if (GF.acts.length) return GF.acts.includes(actKeyOf(a));
+  return true;
+}
+function gfLbl() {                                   // libellé du périmètre choisi
+  const bits = [];
+  GF.flux.forEach(f => bits.push(FLUX_LBL[f]));
+  if (GF.chan.length && !GF.flux.length) GF.chan.forEach(c => bits.push(c));
+  if (GF.acts.length) bits.push(GF.acts.join(' + '));
+  return bits.length ? bits.join(' · ') : 'Total';
+}
+function gfCascade() {
+  const chanAllow = new Set(); effFluxSet().forEach(f => (FLUX_CH[f] || []).forEach(c => chanAllow.add(c)));
+  GF.chan = GF.chan.filter(c => chanAllow.has(c));
+  const actAllow = new Set(); effChanSet().forEach(c => (CH_ACTS[c] || []).forEach(a => actAllow.add(a)));
+  GF.acts = GF.acts.filter(a => actAllow.has(a));
+}
+function gfRender() {
+  const fx = $('gfFlux'), cx = $('gfChan'), ax = $('gfActs');
+  fx.innerHTML = Object.keys(FLUX_CH).map(f =>
+    `<button type="button" class="chipbtn${GF.flux.includes(f) ? ' on' : ''}" data-f="${f}">${FLUX_LBL[f]}</button>`).join('');
+  const chanAllow = new Set(); effFluxSet().forEach(f => (FLUX_CH[f] || []).forEach(c => chanAllow.add(c)));
+  cx.innerHTML = ['PHONE', 'MAIL', 'CHAT'].filter(c => chanAllow.has(c)).map(c =>
+    `<button type="button" class="chipbtn${GF.chan.includes(c) ? ' on' : ''}" data-c="${c}">${c}</button>`).join('');
+  const actAllow = new Set(); effChanSet().forEach(c => (CH_ACTS[c] || []).forEach(a => actAllow.add(a)));
+  ax.innerHTML = [...actAllow].map(a =>
+    `<button type="button" class="chipbtn${GF.acts.includes(a) ? ' on' : ''}" data-a="${a}">${a}</button>`).join('');
+  fx.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const f = b.dataset.f;
+    GF.flux = GF.flux.includes(f) ? GF.flux.filter(x => x !== f) : GF.flux.concat(f);
+    gfCascade(); gfSave(); gfRender(); if (RENDERS[PAGE]) RENDERS[PAGE](); }));
+  cx.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const c = b.dataset.c;
+    GF.chan = GF.chan.includes(c) ? GF.chan.filter(x => x !== c) : GF.chan.concat(c);
+    gfCascade(); gfSave(); gfRender(); if (RENDERS[PAGE]) RENDERS[PAGE](); }));
+  ax.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const a = b.dataset.a;
+    GF.acts = GF.acts.includes(a) ? GF.acts.filter(x => x !== a) : GF.acts.concat(a);
+    gfSave(); gfRender(); if (RENDERS[PAGE]) RENDERS[PAGE](); }));
+}
+function gfDisables() {                              // filtres sans objet sur certains onglets
+  const off = { p1: ['gfGW'], p4: ['gfGW', 'gfPW', 'gfIW'], p8: ['gfFW', 'gfCW', 'gfAW'] }[PAGE] || [];
+  ['gfGW', 'gfFW', 'gfCW', 'gfAW', 'gfPW', 'gfIW'].forEach(id => $(id).classList.toggle('dis', off.includes(id)));
+}
+function syncGInputs() { $('gDa').value = GF.a || ''; $('gDb').value = GF.b || ''; }
+function gfApplyPreset() {                           // Période (préréglages) -> Intervalle du/au
+  if (GF.per === 'all') { GF.a = ''; GF.b = ''; syncGInputs(); return; }
+  if (GF.per === 'custom') return;
+  const bd = perBounds(PAGE), mx = bd[1] || new Date().toISOString().slice(0, 10);
+  let a = '', b = '';
+  if (GF.per === 'last') { a = mx.slice(0, 7) + '-01'; b = mx; }
+  else if (GF.per === 'prev') {
+    const pm = new Date(mx.slice(0, 7) + '-01T00:00:00'); pm.setMonth(pm.getMonth() - 1);
+    const nx = new Date(pm); nx.setMonth(nx.getMonth() + 1); nx.setDate(0);
+    a = pm.toISOString().slice(0, 10); b = nx.toISOString().slice(0, 10);
+  }
+  else if (GF.per === 'd7')  { a = addDays(mx, -6);  b = mx; }
+  else if (GF.per === 'd30') { a = addDays(mx, -29); b = mx; }
+  GF.a = a; GF.b = b; syncGInputs();
+}
+function bindGBar() {
+  gfLoad(); syncGInputs();
+  $('gG').value = GF.g || 'jour'; $('gP').value = GF.per || 'all';
+  $('gG').addEventListener('change', () => { GF.g = $('gG').value; gfSave(); if (RENDERS[PAGE]) RENDERS[PAGE](); });
+  $('gP').addEventListener('change', () => { GF.per = $('gP').value; gfApplyPreset(); gfSave(); if (RENDERS[PAGE]) RENDERS[PAGE](); });
+  $('gDa').addEventListener('change', () => { GF.a = $('gDa').value || ''; GF.per = 'custom'; $('gP').value = 'custom'; gfSave(); if (RENDERS[PAGE]) RENDERS[PAGE](); });
+  $('gDb').addEventListener('change', () => { GF.b = $('gDb').value || ''; GF.per = 'custom'; $('gP').value = 'custom'; gfSave(); if (RENDERS[PAGE]) RENDERS[PAGE](); });
+  gfRender();
+}
 
 /* ---------- helpers ---------- */
 const $  = id => document.getElementById(id);
@@ -112,6 +217,7 @@ function emptyData() {
            dmt: { file: '', maj: '', dates: [], flows: [], f: {} },
            mail: { file: '', maj: '', dates: [], flows: [], f: {} },
            pmail: { file: '', maj: '', rows: [] },
+           plan: null,
            prev: null };
 }
 function ensure() {
@@ -131,6 +237,7 @@ function ensure() {
   if (!D.dmt) D.dmt = { file: '', maj: '', dates: [], flows: [], f: {} };
   if (!D.mail) D.mail = { file: '', maj: '', dates: [], flows: [], f: {} };
   if (!D.pmail) D.pmail = { file: '', maj: '', rows: [] };
+  if (D.plan === undefined) D.plan = null;
   if (D.prev === undefined) D.prev = null;
 }
 function save() { try { localStorage.setItem(LS, JSON.stringify(D)); } catch (e) { console.warn('localStorage', e); } }
@@ -186,6 +293,8 @@ function go(p) {
   PAGE = p;
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.p === p));
   document.querySelectorAll('section.page').forEach(s => s.classList.toggle('on', s.id === p));
+  gfDisables();
+  if (GF.per && GF.per !== 'all' && GF.per !== 'custom') gfApplyPreset();
   if (RENDERS[p]) RENDERS[p]();
 }
 
@@ -198,7 +307,9 @@ function renderHead() {
   else if (m.roadmap) bits.push('Roadmap : ' + m.roadmap);
   if (m.capa) bits.push('Capacité : ' + m.capa);
   if (D.planH && D.planH.dates && D.planH.dates.length)
-    bits.push('Planning : ' + (m.plan || D.planH.file || 'importé') + ' (' + D.planH.dates.length + ' j)');
+    bits.push('Planning (h) : ' + (m.plan || D.planH.file || 'importé') + ' (' + D.planH.dates.length + ' j)');
+  if (D.plan && D.plan.dates && D.plan.dates.length)
+    bits.push('Planification : ' + ((D.plan.meta && D.plan.meta.file) || 'importée') + ' (' + D.plan.dates.length + ' j)');
   if (D.etp && D.etp.file) bits.push('ETP : ' + D.etp.file);
   if (D.real && D.real.dates && D.real.dates.length)
     bits.push('Réalisé : ' + (m.real || D.real.file || 'DRM') + ' (' + D.real.dates.length + ' j)');
@@ -727,6 +838,108 @@ function impPmail(name, buf) {
   return rows.length + ' lignes de prévision · ' + new Set(rows.map(r => r[0])).size + ' jours';
 }
 
+/* ---- Planification : feuille « Planning » (une ligne = agent × jour) ----
+   Lignes Statut = « Planifié » uniquement. Présence par créneau 30 min =
+   recouvrement [Shift In, Shift Out) − recouvrement [Pause repas).
+   FIM (Compétences = FIM ou Total FIM ≥ HP) = personnes hors prod : comptées à part, 0 en prod.
+   Allaitement déduit au prorata du shift : facteur (HP − allaitement) / HP.
+   HP du fichier = shift − pause repas ; heures en prod = HP − Total FIM − Allaitement. */
+function tMin(v) {                                   // valeur temps -> minutes (float) ou null
+  if (v == null || v === '') return null;
+  if (v instanceof Date && !isNaN(v)) return v.getHours() * 60 + v.getMinutes() + v.getSeconds() / 60;
+  if (typeof v === 'number' && isFinite(v)) return v >= 0 && v < 1 ? Math.round((v % 1) * 1440) : null;
+  const m = String(v).trim().match(/^(\d{1,2})[:hH](\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  return +m[1] * 60 + +m[2] + (m[3] ? +m[3] / 60 : 0);
+}
+function tHrs(v) {                                   // durée -> heures (0 si vide)
+  if (v == null || v === '') return 0;
+  if (v instanceof Date && !isNaN(v)) return v.getHours() + v.getMinutes() / 60 + v.getSeconds() / 3600;
+  if (typeof v === 'number' && isFinite(v)) return v <= 1.5 ? v * 24 : v;
+  const m = String(v).trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return 0;
+  return +m[1] + +m[2] / 60 + (m[3] ? +m[3] / 3600 : 0);
+}
+const ovMin = (s1, e1, s2, e2) => Math.max(0, Math.min(e1, e2) - Math.max(s1, s2));
+const r2d = v => Math.round(v * 100) / 100;
+function planAgg(rows) {                             // agrégation -> matrice dates × créneaux
+  const pr = rows.filter(r => r.ok);
+  if (!pr.length) throw new Error('Aucune ligne planifiée exploitable (Statut = Planifié avec Shift In/Out)');
+  const dates = [...new Set(pr.map(r => r.d))].sort();
+  const g0 = Math.floor(Math.min(...pr.map(r => r.sin)) / 30) * 30;
+  const g1 = Math.ceil(Math.max(...pr.map(r => r.sout)) / 30) * 30;
+  const slots = []; for (let t = g0; t < g1; t += 30) slots.push(t);
+  const by = {}; pr.forEach(r => (by[r.d] = by[r.d] || []).push(r));
+  const m = { prod: {}, fim: {}, pres: {} }, day = {};
+  dates.forEach(d => {
+    const prod = slots.map(() => 0), fim = slots.map(() => 0), pres = slots.map(() => 0);
+    let hp = 0, alla = 0, fimh = 0, rep = 0, n = 0, nF = 0; const ags = [];
+    by[d].forEach(r => {
+      const hasRep = r.r1 != null && r.r2 != null && r.r2 > r.r1;
+      const repM = hasRep ? ovMin(r.r1, r.r2, 0, 1440) : 0;
+      rep += repM / 60; hp += r.hp; alla += r.alla; fimh += r.fim; n++; ags.push(r.ag);
+      if (r.fimrow) nF++;
+      const f = r.hp > 0 ? Math.max(0, (r.hp - r.alla) / r.hp) : 1;
+      slots.forEach((s, i) => {
+        const x = ovMin(s, s + 30, r.sin, r.sout) - (hasRep ? ovMin(s, s + 30, r.r1, r.r2) : 0);
+        if (x <= 0) return;
+        const w = x / 30;
+        pres[i] += w;
+        if (r.fimrow) fim[i] += w; else prod[i] += w * f;
+      });
+    });
+    m.prod[d] = prod.map(v => Math.round(v * 1000) / 1000);
+    m.fim[d]  = fim.map(v => Math.round(v * 1000) / 1000);
+    m.pres[d] = pres.map(v => Math.round(v * 1000) / 1000);
+    day[d] = { plan: n, fim: nF, hp: r2d(hp), hprod: r2d(Math.max(0, hp - fimh - alla)),
+               alla: r2d(alla), fimh: r2d(fimh), repas: r2d(rep), ag: ags };
+  });
+  return { meta: { agents: new Set(pr.map(r => r.ag)).size }, dates,
+           slots: slots.map(t => slotLab(Math.floor(t / 60) * 100 + t % 60)), m, day };
+}
+function impPlanning(name, buf) {
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const trySheet = n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null });
+  let aoa = null;
+  const sn = wb.SheetNames.find(n => norm(n) === 'planning') || wb.SheetNames.find(n => norm(n).includes('planning'));
+  if (sn) aoa = trySheet(sn);
+  else for (const n of wb.SheetNames) {
+    const a = trySheet(n); const h = (a[0] || []).map(v => norm(v));
+    if (h.includes('statut') && h.some(x => x.includes('shift'))) { aoa = a; break; }
+  }
+  if (!aoa) throw new Error('Feuille « Planning » introuvable (Statut + Shift In/Out attendus)');
+  let hi = aoa.findIndex(r => r && r.some(v => norm(v) === 'statut') && r.some(v => norm(v).includes('shift')));
+  if (hi < 0) hi = 0;
+  const head = (aoa[hi] || []).map(v => norm(v));
+  const col = (nm, alts) => { let i = head.indexOf(nm);
+    if (i >= 0) return i;
+    if (alts) for (const a of alts) { i = head.findIndex(h => h.includes(a)); if (i >= 0) return i; }
+    return -1; };
+  const cD = col('date'), cSt = col('statut'), cAg = col('log vonage', ['agent', 'noms']),
+    cCp = col('competences'), cSI = col('shift in', ['debut de shift']), cSO = col('shift out', ['fin de shift']),
+    cR1 = col('debut pause repas'), cR2 = col('fin pause repas'), cHP = col('hp'),
+    cAl = col('allaitement'), cFm = col('total fim');
+  if (cD < 0 || cSt < 0 || cSI < 0 || cSO < 0) throw new Error('Colonnes Statut / date / Shift In / Shift Out introuvables');
+  const rows = [];
+  for (let i = hi + 1; i < aoa.length; i++) {
+    const r = aoa[i] || [];
+    const d = isoD(r[cD]);
+    const sin = tMin(cSI >= 0 ? r[cSI] : null), sout = tMin(cSO >= 0 ? r[cSO] : null);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || sin == null || sout == null || norm(r[cSt]) !== 'planifie') continue;
+    if (sout <= sin) sout += 1440;                                // shift à cheval sur minuit
+    const hp = tHrs(cHP >= 0 ? r[cHP] : 0), alla = tHrs(cAl >= 0 ? r[cAl] : 0), fim = tHrs(cFm >= 0 ? r[cFm] : 0);
+    const comp = norm(cCp >= 0 ? r[cCp] : '');
+    rows.push({ ok: true, d, ag: String(cAg >= 0 ? (r[cAg] ?? '') : ''),
+      fimrow: comp === 'fim' || (fim > 0 && hp > 0 && fim >= hp - 0.01),
+      sin, sout, r1: tMin(cR1 >= 0 ? r[cR1] : null), r2: tMin(cR2 >= 0 ? r[cR2] : null), hp, alla, fim });
+  }
+  const plan = planAgg(rows);
+  plan.meta = Object.assign(plan.meta || {}, { file: name, maj: new Date().toISOString().slice(0, 10) });
+  D.plan = plan;
+  D.meta.planA = name;
+  return plan.dates.length + ' jours · ' + plan.slots.length + ' créneaux 30 min · ' + plan.meta.agents + ' agents planifiés';
+}
+
 /* ---- Prévision Webhelp : onglet « 2026 » (prévus mensuels par flux) + onglet « Poids » ----
    Poids journaliers (Appel B-F, Mail J-L) -> vue par jour ; créneaux 30 min (col. R :
    730 = 07:30, profils « Lundi au samedi » / « Dimanche » S..AA) -> vue par créneau.
@@ -744,6 +957,19 @@ function prevDayVol(m, d) {                                          // volumes 
   const o = { a: {}, m: {} };
   PACTS.forEach(f => { o.a[f] = (mo.appels[f] || 0) * (w.a[f] || 0); o.m[f] = (mo.mails[f] || 0) * (w.m[f] || 0); });
   return o;
+}
+function whPrevDay(k, c, d) {          // prévision du jour = prévu du mois × poids journalier
+  const P = D.prev; if (!P || !P.mois) return null;   // k : 'hyper'… · c : 'a' (appels) | 'm' (mails) -> volume ou null
+  const mk = mKey(d), mo = P.mois[mk]; if (!mo) return null;
+  const src = c === 'a' ? mo.appels : mo.mails;
+  const mv = src[k]; if (mv == null) return null;
+  if (mv <= 0) return 0;
+  const w = ((P.poidsJour || {})[d] || {})[c] || {};
+  const wv = w[k];
+  if (wv != null && wv > 0) return mv * wv;
+  const ds = Object.keys(P.poidsJour || {}).filter(x => x.startsWith(mk));
+  const nd = ds.length || new Date(+mk.slice(0, 4), +mk.slice(5, 7), 0).getDate();
+  return mv / nd;                                     // poids absent : répartition uniforme
 }
 
 function impPrev(name, buf) {
@@ -876,8 +1102,12 @@ function bindImports() {
     catch (err) { setStatus('stMail', 'Erreur : ' + err.message, false); }
   }));
   $('fPmail').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stPmail', impPmail(f.name, b), true); afterImport('p7'); }
+    try { setStatus('stPmail', impPmail(f.name, b), true); afterImport('p5'); }
     catch (err) { setStatus('stPmail', 'Erreur : ' + err.message, false); }
+  }));
+  $('fPlanA').addEventListener('change', e => readFile(e.target, (f, b) => {
+    try { setStatus('stPlanA', impPlanning(f.name, b), true); afterImport('p8'); }
+    catch (err) { setStatus('stPlanA', 'Erreur : ' + err.message, false); }
   }));
   $('fPrev').addEventListener('change', e => readFile(e.target, (f, b) => {
     try { setStatus('stPrev', impPrev(f.name, b), true); afterImport('p4'); }
@@ -1028,6 +1258,24 @@ function demo() {
     dj[dk][c][f] = Math.round(dj[dk][c][f] / wsumD[c] * 1e6) / 1e6)); });
   base.prev = { meta: { file: 'Démo Webhelp', maj: today, snapshot: today }, mois: { [dmk]: dmo },
     poidsJour: dj, poidsChat: {}, creneaux: { [dmk]: dcr } };
+  /* planification démo : 12 agents prod + 4 FIM (hors prod) + allaitement pour 1 agent */
+  const agentsD = [];
+  for (let i = 0; i < 12; i++) agentsD.push({ n: 'Agent LOT ' + (i + 1), fim: false, alla: i === 2 ? 1 : 0 });
+  for (let i = 0; i < 4; i++) agentsD.push({ n: 'Agent FIM ' + (i + 1), fim: true, alla: 0 });
+  const dr = [];
+  past.forEach((d, di) => {
+    const wd = new Date(d + 'T00:00:00').getDay();
+    agentsD.forEach((a, ai) => {
+      if ((di + ai) % 7 === 3) return;                              // day off
+      const sin = 10 * 60 + (ai % 3) * 30;
+      const sout = sin + (wd === 0 ? 5 : 9) * 60 - (wd === 6 ? 2 * 60 : 0);
+      const r1 = sin + 240, r2 = r1 + 60;
+      dr.push({ ok: true, d, ag: a.n, fimrow: a.fim, sin, sout, r1, r2,
+        hp: (sout - sin - 60) / 60, alla: a.alla, fim: a.fim ? (sout - sin - 60) / 60 : 0 });
+    });
+  });
+  base.plan = planAgg(dr);
+  base.plan.meta = Object.assign(base.plan.meta, { file: 'Démo Planning', maj: today });
   /* réalisé démo : DRM voix cohérent avec la capacitaire */
   const R = base.real; R.file = 'Démo DRM'; R.maj = today;
   past.forEach(d => {
@@ -1047,50 +1295,25 @@ function demo() {
    SÉLECTEURS COMMUNS
    ===================================================================== */
 function fillSelects() {
-  /* p1 : périmètre + semaine analysée (modèle RM v2) */
+  /* p1 : semaine analysée (modèle RM v2) — périmètre piloté par les filtres globaux */
   const R = D.rm2;
-  const s1 = $('w1P'), sw = $('w1W');
+  const sw = $('w1W');
   if (R && R.weeks && R.weeks.length) {
-    const cur = s1.value;
-    s1.innerHTML = '<option value="">Total</option>' +
-      ['FO', 'BO', 'AU'].map(f => `<option value="fam:${f}">${RM_FAMLBL[f]}</option>`).join('') +
-      R.acts.map(a => `<option value="act:${a.k}">${a.k}</option>`).join('');
-    if ([...s1.options].some(o => o.value === cur)) s1.value = cur;
     const curW = sw.value;
     sw.innerHTML = R.weeks.map((w, i) => `<option value="${i}">${w.k} · du ${w.start ? dShort(w.start) : '?'} </option>`).join('');
     const t = new Date().toISOString().slice(0, 10);
     const defI = Math.max(0, R.weeks.findIndex(w => w.start && w.start >= t) >= 0
       ? R.weeks.findIndex(w => w.start && w.start >= t) : R.weeks.length - 1);
     sw.value = [...sw.options].some(o => o.value === curW) ? curW : String(defI);
-  } else { s1.innerHTML = '<option value="">—</option>'; sw.innerHTML = ''; }
-  /* p2 : activités capa */
-  const s2 = $('s2F');
-  s2.innerHTML = '<option value="">Toutes les activités</option>' +
-    D.capa.flux.map((f, i) => `<option value="${i}">${f.k}</option>`).join('');
-  /* p3 : activités = union capa + planning + réalisé */
-  const set3 = new Set([
-    ...D.capa.flux.map(f => f.a),
-    ...D.planH.acts,
-    ...RFLOW.map(f => f.charAt(0) + f.slice(1).toLowerCase())
-  ].filter(Boolean));
-  const s3 = $('s3F');
-  s3.innerHTML = '<option value="">Toutes les activités</option>' + [...set3].sort().map(k => `<option value="${k}">${k}</option>`).join('');
-  /* p5 : activités par canal */
-  fill5Acts();
+  } else { sw.innerHTML = ''; }
   /* sources */
   $('w1Src').textContent = R && R.weeks && R.weeks.length
     ? 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') + ' · ' + R.weeks.length + ' sem.'
     : 'Modèle RM : à importer';
   $('w2Src').textContent = 'Capacitaire : ' + (D.capa.dates.length ? D.meta.capa : '—');
-  $('w3Src').textContent = 'Planning : ' + (D.planH.dates.length ? D.planH.file : 'à importer') +
+  $('w3Src').textContent = 'Planning (h) : ' + (D.planH.dates.length ? D.planH.file : 'à importer') +
     (D.capa.dates.length ? ' · Capacitaire : ' + (D.meta.capa || 'importée') : '');
   $('w5Src').textContent = 'Phone : DRM + Vonage · Mail : Export Mail · Chat : —';
-  $('w6Src').textContent = D.dmt.dates.length
-    ? 'DMT : ' + (D.meta.dmt || D.dmt.file) + ' · ' + D.dmt.dates[0] + ' → ' + D.dmt.dates[D.dmt.dates.length - 1]
-    : 'Export Vonage : à importer';
-  $('w7Src').textContent = D.mail.dates.length
-    ? 'Mail : ' + (D.meta.mail || D.mail.file) + ' · ' + D.mail.dates[0] + ' → ' + D.mail.dates[D.mail.dates.length - 1]
-    : 'Export Mail : à importer';
   fill4();
   $('w4Src').textContent = prevHas()
     ? 'Prévision Webhelp : ' + (D.meta.prev || (D.prev.meta && D.prev.meta.file) || 'Webhelp') +
@@ -1100,11 +1323,8 @@ function fillSelects() {
 }
 
 /* =====================================================================
-   FILTRES DE PÉRIODE (un jeu de contrôles par onglet)
+   FILTRES DE PÉRIODE GLOBAUX (Période -> Intervalle du/au, cf. barre gBar)
    ===================================================================== */
-const PERIOD_P = { p2: ['d2A','d2B','d2P'], p3: ['d3A','d3B','d3P'],
-                   p5: ['d5A','d5B','d5P'], p6: ['d6A','d6B','d6P'],
-                   p7: ['d7A','d7B','d7P'] };
 function perBounds(p) {                                            // bornes de données de l'onglet
   switch (p) {
     case 'p1': { const R2 = D.rm2;
@@ -1117,40 +1337,14 @@ function perBounds(p) {                                            // bornes de 
                  return d.length ? [d[0], d[d.length - 1]] : []; }
     case 'p5': { const d = [...D.real.dates, ...D.mail.dates].filter(Boolean).sort();
                  return d.length ? [d[0], d[d.length - 1]] : []; }
-    case 'p6': { const d = D.dmt.dates; return d.length ? [d[0], d[d.length - 1]] : []; }
-    case 'p7': { const d = D.mail.dates; return d.length ? [d[0], d[d.length - 1]] : []; }
+    case 'p8': { const d = (D.plan && D.plan.dates) || []; return d.length ? [d[0], d[d.length - 1]] : []; }
   }
   return [];
 }
-function perRange(p) {
-  const ids = PERIOD_P[p] || [];
-  return [ids[0] && $(ids[0]) ? $(ids[0]).value || '' : '', ids[1] && $(ids[1]) ? $(ids[1]).value || '' : ''];
-}
-function inPer(p, d) { const [a, b] = perRange(p); return (!a || d >= a) && (!b || d <= b); }
-function setPreset(p) {
-  const ids = PERIOD_P[p], bd = perBounds(p);
-  const mx = bd[1] || new Date().toISOString().slice(0, 10);
-  const v = $(ids[2]).value;
-  if (v === 'custom') return;
-  let a = '', b = '';
-  if (v === 'last') { a = mx.slice(0, 7) + '-01'; b = mx; }
-  else if (v === 'prev') {
-    const pm = new Date(mx.slice(0, 7) + '-01T00:00:00'); pm.setMonth(pm.getMonth() - 1);
-    const nx = new Date(pm); nx.setMonth(nx.getMonth() + 1); nx.setDate(0);
-    a = pm.toISOString().slice(0, 10); b = nx.toISOString().slice(0, 10);
-  }
-  else if (v === 'd7')  { a = addDays(mx, -6);  b = mx; }
-  else if (v === 'd30') { a = addDays(mx, -29); b = mx; }
-  $(ids[0]).value = a; $(ids[1]).value = b;
-}
-function bindPeriod(p, fn) {
-  const ids = PERIOD_P[p];
-  $(ids[2]).addEventListener('change', () => { setPreset(p); fn(); });
-  $(ids[0]).addEventListener('change', () => { $(ids[2]).value = 'custom'; fn(); });
-  $(ids[1]).addEventListener('change', () => { $(ids[2]).value = 'custom'; fn(); });
-}
+function perRange() { return [GF.a || '', GF.b || '']; }
+function inPer(p, d) { return (!GF.a || d >= GF.a) && (!GF.b || d <= GF.b); }
 function noPer(p, elK, charts, tbl) {                              // affichage « période vide » générique
-  $(elK).innerHTML = '<div class="kpi"><div class="lbl">Aucune donnée sur la période</div><div class="sub">\u00c9largissez le filtre de période.</div></div>';
+  $(elK).innerHTML = '<div class="kpi"><div class="lbl">Aucune donnée sur la période</div><div class="sub">\u00c9largissez le filtre de période (barre de filtres).</div></div>';
   (charts || []).forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
   if (tbl) $(tbl).innerHTML = '';
 }
@@ -1159,23 +1353,17 @@ function noPer(p, elK, charts, tbl) {                              // affichage 
    P1 — ROADMAP (besoin & capacité — modèle RM S46+, hebdo)
    9 blocs : heures log/prod · actes · ETP · effectif · SLA/QE · DMT · TO · absentéisme · congés
    ===================================================================== */
-function rmActsOf(per) {
+function rmActsSel() {                            // activités retenues par les filtres globaux (Flux / Channel / Activités)
   if (!D.rm2) return [];
-  if (!per) return D.rm2.acts.map(a => a.k);
-  if (per.startsWith('fam:')) { const f = per.slice(4); return D.rm2.acts.filter(a => a.fam === f).map(a => a.k); }
-  return [per.slice(4)];
+  return D.rm2.acts.filter(a => gfPass(a.k)).map(a => a.k);
 }
-function rmAgg(sec, per) {                        // série hebdo complète du périmètre
+function rmAggM(sec, acts) {                      // série hebdo agrégée sur un ensemble d'activités
   const R = D.rm2, S = R.s[sec], W = R.weeks.length;
   if (!S) return null;
-  const direct = (!per && sec === 'conges') ? null                    // total fichier en ETP ≠ taux
-    : !per ? S.t : per.startsWith('fam:') ? S.fam[per.slice(4)] : S.a[per.slice(4)];
-  const acts = rmActsOf(per), rate = RM_RATE.has(sec);
-  const wsrc = D.rm2.s[RM_WBY[sec] || 'pfin'];
+  const rate = RM_RATE.has(sec);
+  const wsrc = R.s[RM_WBY[sec] || 'pfin'];
   const out = Array(W).fill(null);
   for (let i = 0; i < W; i++) {
-    const d = direct ? direct[i] : null;
-    if (d != null && d !== 0) { out[i] = d; continue; }
     let sa = 0, any = false, sv = 0, sw = 0;
     acts.forEach(k => {
       const x = (S.a[k] || [])[i];
@@ -1187,24 +1375,18 @@ function rmAgg(sec, per) {                        // série hebdo complète du p
     });
     if (rate && sw > 0) out[i] = sv / sw;
     else if (!rate && any) out[i] = sa;
-    else out[i] = d != null ? d : null;
   }
   return out;
 }
-function rmQE(per, i) {                           // QE = Σ capacité actes / Σ prévision finale
+function rmQEacts(acts, i) {                      // QE = Σ capacité actes / Σ prévision finale
   let c = 0, p = 0;
-  rmActsOf(per).forEach(k => {
+  acts.forEach(k => {
     const CA = D.rm2.s.capa_a, PF = D.rm2.s.pfin;
     const ca = CA && CA.a[k] ? CA.a[k][i] : null, pf = PF && PF.a[k] ? PF.a[k][i] : null;
     if (ca != null) c += ca;
     if (pf != null) p += pf;
   });
   return p > 0 ? c / p : null;
-}
-function rmPerLbl(per) {
-  if (!per) return 'Total';
-  if (per.startsWith('fam:')) return RM_FAMLBL[per.slice(4)];
-  return per.slice(4);
 }
 function rmWindow(saI) {
   const W = D.rm2.weeks.length, f = $('w1F').value;
@@ -1224,11 +1406,19 @@ function r1() {
     $('w1Src').textContent = 'Modèle RM : à importer';
   };
   if (!R || !R.weeks || !R.weeks.length) { blank(); return; }
-  const per = $('w1P').value;
+  const acts = rmActsSel();
+  const perLbl = gfLbl();
   const W = R.weeks.length;
   const saI = Math.min(W - 1, Math.max(0, +($('w1W').value || 0) || 0));
-  const win = rmWindow(saI);
-  if (!win.length) { blank(); return; }
+  const win = rmWindow(saI).filter(i => {                        // + filtre de période / intervalle global
+    const w = R.weeks[i], e = w.end || w.start;
+    return (!GF.a || e >= GF.a) && (!GF.b || w.start <= GF.b); });
+  if (!win.length) {
+    $('k1').innerHTML = '<div class="kpi"><div class="lbl">Aucune semaine sur la période</div><div class="sub">Élargissez la Période ou l\'Intervalle dans la barre de filtres.</div></div>';
+    C1.forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
+    $('t1').innerHTML = ''; $('h1').textContent = ''; $('t1Per').textContent = '—';
+    return;
+  }
   const showY = new Set(win.map(i => R.weeks[i].y)).size > 1;
   const labels = win.map(i => { const w = R.weeks[i]; return 'S' + w.n + (showY ? ' ' + String(w.y).slice(2) : ''); });
   const ttip = win.map(i => { const w = R.weeks[i];
@@ -1236,15 +1426,13 @@ function r1() {
   const secs = ['pfin', 'prev', 'capa_a', 'bes_hlog', 'capa_hlog', 'bes_hprod', 'capa_hprod', 'bes_etp',
     'eff_prod', 'delta_etp', 'dmt', 'occ', 'abs', 'conges', 'conges_etp', 'eff', 'cible'];
   const F = { qe: Array(W).fill(null) };
-  secs.forEach(s => { F[s] = rmAgg(s, per) || Array(W).fill(null); });
-  for (let i = 0; i < W; i++) F.qe[i] = rmQE(per, i);
+  secs.forEach(s => { F[s] = rmAggM(s, acts) || Array(W).fill(null); });
+  for (let i = 0; i < W; i++) F.qe[i] = rmQEacts(acts, i);
   const pI = saI > 0 ? saI - 1 : null;
   const dPts = (a, b) => a != null && b != null ? ' · Δ ' + (a - b >= 0 ? '+' : '') + (Math.round((a - b) * 1000) / 10) + ' pts' : '';
   const dPct = (a, b) => a != null && b != null && b !== 0 ? ' · Δ ' + (a >= b ? '+' : '') + (Math.round((a / b - 1) * 1000) / 10) + ' %' : '';
   const pc1 = v => v == null ? '—' : (Math.round(v * 1000) / 10) + ' %';
   const wSA = R.weeks[saI];
-  const perLbl = rmPerLbl(per);
-  const acts = rmActsOf(per);
 
   /* ---- KPIs de la semaine analysée ---- */
   const qe = F.qe[saI], pf = F.pfin[saI], ca = F.capa_a[saI];
@@ -1307,7 +1495,7 @@ function r1() {
   /* 4 · effectif */
   mkChart('c1d', { type: 'bar', data: { labels, datasets: [
       { label: 'Effectif (ETP activités)', data: win.map(i => F.eff[i]), backgroundColor: '#1098ad', borderRadius: 3 },
-      ...(per === '' ? [{ label: 'Effectif saisi (fichier)', data: win.map(i => R.s.eff ? R.s.eff.t[i] : null),
+      ...(acts.length === R.acts.length ? [{ label: 'Effectif saisi (fichier)', data: win.map(i => R.s.eff ? R.s.eff.t[i] : null),
         type: 'line', borderColor: '#1b2440', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, tension: .3 }] : [])] },
     options: opt(yN('ETP'), c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y ?? 0)) });
 
@@ -1387,7 +1575,7 @@ function r1() {
 
   const notes = [];
   if (ceMode === 'taux') notes.push('Congés en ETP indisponibles (feuille Congés absente) — courbe affichée en taux (%).');
-  if (per === '') notes.push('« Effectif saisi » = ligne Effectif du fichier (têtes) ; les barres = somme des ETP répartis par activité.');
+  if (perLbl === 'Total') notes.push('« Effectif saisi » = ligne Effectif du fichier (têtes) ; les barres = somme des ETP répartis par activité.');
   notes.push('QE = capacité actes ÷ prévision finale · DMT / TO / absentéisme agrégés en pondéré (poids : prévision ou effectif).');
   $('h1').textContent = notes.join(' ');
   $('w1Src').textContent = 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') +
@@ -1432,19 +1620,28 @@ function renderProdEd() {                           // hypothèses de productivi
 function r2() {
   const C = D.capa;
   if (!C.dates.length) { $('k2').innerHTML = '<div class="kpi"><div class="lbl">Aucune capacitaire</div><div class="sub">Importez le fichier Capacitaire (onglet DAILY VISION).</div></div>'; $('t2').innerHTML = ''; mkChart('c2a', { type: 'bar', data: { labels: [], datasets: [] } }); renderProdEd(); return; }
-  const g = $('s2G').value, fsel = $('s2F').value, u = $('s2U').value;    // u : 'a' = actes, 'h' = heures
+  const g = GF.g, u = $('s2U').value;                                     // u : 'a' = actes, 'h' = heures
+  const fluxAll = C.flux.filter(f => gfPass(f.k));
+  if (!fluxAll.length) {
+    $('k2').innerHTML = '<div class="kpi"><div class="lbl">Aucune activité dans ce périmètre</div><div class="sub">Ajustez les filtres Flux / Channel / Activités.</div></div>';
+    $('t2').innerHTML = ''; mkChart('c2a', { type: 'bar', data: { labels: [], datasets: [] } }); return;
+  }
   const keep = C.dates.map((d, i) => [d, i]).filter(([d]) => inPer('p2', d)).map(([, i]) => i);
   if (!keep.length) { noPer('p2', 'k2', ['c2a'], 't2'); return; }
   const fD = keep.map(i => C.dates[i]);
   const { keys, idx } = aggBy(fD, g);
   const zero = () => Array(keys.length).fill(0);
-  const flux = fsel === '' ? C.flux : [C.flux[+fsel]];
+  const flux = fluxAll;
   const acc = flux.map(() => zero());
   const tPrev = zero(), tContr = zero();
-  let convUsed = false, hMissing = false;
+  let convUsed = false, hMissing = false, whUsed = false;
   flux.forEach((f, fi) => {
+    const pk = actKeyOf(f.k).toLowerCase(), pc = f.c === 'Mail' ? 'm' : 'a';
     keep.forEach((oi, k) => {
-      const ca = f.capa[oi] || 0, pv = f.prev[oi] || 0, ct = f.contr[oi] || 0;
+      const d = C.dates[oi];
+      const ca = f.capa[oi] || 0, ct = f.contr[oi] || 0;
+      const wh = whPrevDay(pk, pc, d);                    // répartition journalière pondérée par la prévision
+      let pv; if (wh != null) { pv = wh; whUsed = true; } else pv = f.prev[oi] || 0;
       if (u === 'a') {
         acc[fi][idx[k]] += ca; tPrev[idx[k]] += pv; tContr[idx[k]] += ct;
       } else {
@@ -1473,7 +1670,8 @@ function r2() {
   $('k2').innerHTML =
     kpi('Capacitaire (' + labU + ')', fmt(tCapa), keys[0] + ' → ' + keys[keys.length - 1]) +
     kpi('Capacitaire (' + labO + ')', anyO && totO ? fmt(Math.round(totO)) : '—', srcNote) +
-    kpi('Prévu total', fmt(Math.round(P)), 'couverture ' + pctS(tCapa, P)) +
+    kpi('Prévu total', fmt(Math.round(P)), 'couverture ' + pctS(tCapa, P) +
+        (whUsed ? ' · répartition journalière pondérée par la prévision (poids du mois)' : ' · prévu du fichier capacitaire')) +
     kpi('Contractuel total', fmt(Math.round(K)), pctS(K, tCapa) + ' de la capacité');
   mkChart('c2a', { type: 'bar', data: { labels: keys, datasets: [
       ...acc.map((s, i) => ({ label: flux[i].k, data: s.map(v => Math.round(v * 10) / 10), backgroundColor: PAL[i % PAL.length], stack: 'c', borderRadius: 2 })),
@@ -1506,7 +1704,7 @@ function r3() {
     mkChart('c3a', { type: 'bar', data: { labels: [], datasets: [] } });
     mkChart('c3b', { type: 'bar', data: { labels: [], datasets: [] } }); return;
   }
-  const g = $('s3G').value, fsel = $('s3F').value;
+  const g = GF.g;
   const days = [...new Set([...C.dates, ...P.dates])].filter(d => inPer('p3', d)).sort();
   if (!days.length) { noPer('p3', 'k3', ['c3a', 'c3b'], 't3'); $('p3Hint').textContent = ''; return; }
   const kOf = d => g === 'mois' ? mKey(d) : g === 'semaine' ? wLab(d) : d;
@@ -1515,10 +1713,9 @@ function r3() {
   const z = () => Array(keys.length).fill(0);
   const pvA = z(), rlA = z(), pvH = z(), plH = z(), reD = z();
   const missProd = new Set(), noHrs = new Set();
-  const fSel = a => !fsel || norm(a) === norm(fsel);
-  /* capa prévue (actes + heures) */
+  /* capa prévue (actes + heures) — périmètre des filtres globaux */
   C.flux.forEach(f => {
-    if (!fSel(f.a)) return;
+    if (!gfPass(f.k)) return;
     const hp = prodOf(f.a);
     C.dates.forEach((d, di) => {
       const k = idxOf[kOf(d)]; if (k == null) return;
@@ -1532,7 +1729,7 @@ function r3() {
   /* capa réelle (planning) : heures planifiées → actes via hypothèses */
   const hasPlan = P.dates.length > 0;
   P.acts.forEach(a => {
-    if (!fSel(a)) return;
+    if (!gfPass(a)) return;
     const hp = prodOf(a);
     if (!hp) missProd.add(a);
     P.dates.forEach((d, di) => {
@@ -1546,7 +1743,7 @@ function r3() {
   R.dates.forEach((d, di) => {
     const k = idxOf[kOf(d)]; if (k == null) return;
     RFLOW.forEach(f => {
-      if (fsel && norm(f) !== norm(fsel) && norm(f.charAt(0) + f.slice(1).toLowerCase()) !== norm(fsel)) return;
+      if (!gfPass(f, 'PHONE')) return;
       reD[k] += R.f[f].t[di] || 0;
     });
   });
@@ -1554,7 +1751,7 @@ function r3() {
   const TP = pvA.reduce((a, b) => a + b, 0), TRl = rlA.reduce((a, b) => a + b, 0);
   const TH = pvH.reduce((a, b) => a + b, 0), LH = plH.reduce((a, b) => a + b, 0), RD = reD.reduce((a, b) => a + b, 0);
   $('k3').innerHTML =
-    kpi('Capa prévue (actes)', fmt(TP), g + (fsel ? ' · ' + fsel : ' · toutes activités')) +
+    kpi('Capa prévue (actes)', fmt(TP), g + ' · ' + gfLbl()) +
     (hasPlan ? kpi('Capa réelle — planning (actes)', fmt(TRl), pctS(TRl, TP) + ' de la capa prévue' + (missProd.size ? ' · prod. manquante : ' + [...missProd].join(', ') : ''), TP ? Math.min(100, Math.abs(TRl - TP) / TP * 100) : 0)
              : kpi('Planning non importé', '—', 'importez date · activité · heures')) +
     kpi('Écart capa (réel − prévu)', hasPlan ? fmt(TRl - TP) : '—', hasPlan ? (TRl - TP >= 0 ? 'sur-capacité' : 'sous-capacité') : 'nécessite le planning', TP && hasPlan ? Math.min(100, Math.abs(TRl - TP) / TP * 100) : 0) +
@@ -1596,6 +1793,121 @@ function r3() {
 }
 
 /* =====================================================================
+   P8 — PLANIFICATION (feuille Planning : personnes par jour & créneaux 30 min)
+   Personnes planifiées en prod = présence [Shift In, Shift Out) − pause repas,
+   hors FIM (hors prod), allaitement déduit au prorata — cf. impPlanning / planAgg.
+   ===================================================================== */
+function planEmpty() { return !D.plan || !D.plan.dates || !D.plan.dates.length; }
+function defSlotDay8() {                            // jour par défaut : le plus chargé
+  const P = D.plan; if (!P || !P.dates || !P.dates.length) return;
+  const cur = $('w8D').value;
+  if (cur && P.dates.includes(cur)) { $('w8D').min = P.dates[0]; $('w8D').max = P.dates[P.dates.length - 1]; return; }
+  let best = P.dates[0] || '', bv = -1;
+  P.dates.forEach(d => { const t = (P.m.prod[d] || []).reduce((a, b) => a + b, 0); if (t > bv) { bv = t; best = d; } });
+  $('w8D').value = best;
+  $('w8D').min = P.dates[0]; $('w8D').max = P.dates[P.dates.length - 1];
+}
+function r8() {
+  const has = !planEmpty();
+  $('p8body').style.display = has ? '' : 'none';
+  $('p8empty').style.display = has ? 'none' : '';
+  if (!has) { $('w8Src').textContent = 'Feuille Planning : à importer'; return; }
+  const P = D.plan;
+  const days = P.dates.filter(d => inPer('p8', d));
+  defSlotDay8();
+  if (!days.length) { noPer('p8', 'k8', ['c8a', 'c8b', 'c8c'], 't8'); $('t8m').innerHTML = ''; $('h8').textContent = '';
+    $('w8Src').textContent = 'Planification : aucun jour sur ' + rangeLbl(...perRange()); return; }
+  const slots = P.slots;
+  const g = GF.g;
+  /* KPIs de la période */
+  const ags = new Set();
+  days.forEach(d => (P.day[d].ag || []).forEach(a => ags.add(a)));
+  const totPlan = days.reduce((s, d) => s + P.day[d].plan, 0);
+  const totFimN = days.reduce((s, d) => s + P.day[d].fim, 0);
+  const HP = days.reduce((s, d) => s + P.day[d].hp, 0);
+  const HPD = days.reduce((s, d) => s + P.day[d].hprod, 0);
+  const AL = days.reduce((s, d) => s + P.day[d].alla, 0);
+  const FM = days.reduce((s, d) => s + P.day[d].fimh, 0);
+  const RP = days.reduce((s, d) => s + P.day[d].repas, 0);
+  /* vue par créneau : moyenne période ou jour précis */
+  const v8 = $('w8V').value, d8 = $('w8D').value, jourPrecis = v8 === 'jour' && P.m.prod[d8];
+  const vec = jourPrecis ? P.m.prod[d8].slice() : slots.map((_, i) => days.reduce((s, d) => s + (P.m.prod[d][i] || 0), 0) / days.length);
+  const fimV = jourPrecis ? (P.m.fim[d8] || []).slice() : slots.map((_, i) => days.reduce((s, d) => s + (P.m.fim[d][i] || 0), 0) / days.length);
+  const iP = vec.indexOf(Math.max(...vec));
+  $('k8').innerHTML =
+    kpi('Agents planifiés', fmt(ags.size), days.length + ' jour(s) sur la période') +
+    kpi('Personnes planifiées / jour', fmt1(totPlan / days.length), 'dont FIM hors prod ' + fmt1(totFimN / days.length) + ' / j') +
+    kpi('Heures planifiées (HP)', fmt(Math.round(HP)) + ' h', 'hors pause repas ' + fmt(Math.round(RP)) + ' h') +
+    kpi('Heures en prod', fmt(Math.round(HPD)) + ' h', 'hors FIM ' + fmt(Math.round(FM)) + ' h et allaitement ' + fmt1(AL) + ' h') +
+    kpi('Pointe ' + (jourPrecis ? dShort(d8) : 'moyenne période'), fmt1(vec[iP]), slots[iP] + ' · personnes en prod');
+  /* graphique 1 : personnes par jour (granularité globale) */
+  const { keys, idx } = aggBy(days, g);
+  const cnt = Array(keys.length).fill(0);
+  const prodB = keys.map(() => 0), fimB = keys.map(() => 0), hpdB = keys.map(() => 0);
+  days.forEach((d, j) => { const k = idx[j]; cnt[k]++;
+    prodB[k] += P.day[d].plan - P.day[d].fim; fimB[k] += P.day[d].fim; hpdB[k] += P.day[d].hprod; });
+  const avgArr = a => a.map((v, i) => cnt[i] ? v / cnt[i] : 0);
+  const isAvg = g !== 'jour';
+  mkChart('c8a', { type: 'bar', data: { labels: keys, datasets: [
+      { label: isAvg ? 'Planifiés prod (moy. / jour)' : 'Planifiés prod', data: avgArr(prodB).map(v => Math.round(v * 10) / 10), backgroundColor: '#3b5bdb', stack: 's', borderRadius: 2 },
+      { label: isAvg ? 'FIM hors prod (moy. / jour)' : 'FIM hors prod', data: avgArr(fimB).map(v => Math.round(v * 10) / 10), backgroundColor: '#adb5bd', stack: 's', borderRadius: 2 },
+      { label: 'Heures en prod', data: hpdB.map(v => Math.round(v)), type: 'line', borderColor: '#f59f00', borderWidth: 2, pointRadius: 2, tension: .3, yAxisID: 'y2' }] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' } },
+      scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
+        y: { stacked: true, beginAtZero: true, grid: GRID, title: { display: true, text: 'personnes', font: { size: 10.5 } } },
+        y2: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: 'heures', font: { size: 10.5 } } } } } });
+  /* graphique 2 : personnes par créneau 30 min */
+  mkChart('c8b', { type: 'bar', data: { labels: slots, datasets: [
+      { label: 'Planifiés prod', data: vec.map(v => Math.round(v * 10) / 10), backgroundColor: '#3b5bdb', borderRadius: 2 },
+      { label: 'FIM hors prod', data: fimV.map(v => Math.round(v * 10) / 10), backgroundColor: '#adb5bd', borderRadius: 2 }] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y) } } },
+      scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
+                y: { stacked: true, beginAtZero: true, ...axisY('personnes / créneau') } } } });
+  /* graphique 3 : heures par jour — prod / FIM / allaitement + HP */
+  mkChart('c8c', { type: 'bar', data: { labels: days.map(dShort), datasets: [
+      { label: 'Heures en prod', data: days.map(d => P.day[d].hprod), backgroundColor: '#0ca678', stack: 's', borderRadius: 2 },
+      { label: 'FIM (hors prod)', data: days.map(d => P.day[d].fimh), backgroundColor: '#f59f00', stack: 's', borderRadius: 2 },
+      { label: 'Allaitement', data: days.map(d => P.day[d].alla), backgroundColor: '#d6336c', stack: 's', borderRadius: 2 },
+      { label: 'HP (planifiées)', data: days.map(d => P.day[d].hp), type: 'line', borderColor: '#1b2440', borderWidth: 2, pointRadius: 1.5, tension: .3 }] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' } },
+      scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
+                y: { stacked: true, beginAtZero: true, ...axisY('heures') } } } });
+  /* tableau détail par jour */
+  let h = '<thead><tr><th>Date</th><th>Jour</th><th>Planifiés</th><th>dont FIM</th><th>HP (h)</th><th>Pause repas (h)</th><th>Prod (h)</th><th>FIM (h)</th><th>Allaitement (h)</th></tr></thead><tbody>';
+  days.forEach(d => { const D8 = P.day[d];
+    h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td><td>${D8.plan}</td><td>${D8.fim}</td>` +
+         `<td>${fmt1(D8.hp)}</td><td>${fmt1(D8.repas)}</td><td>${fmt1(D8.hprod)}</td>` +
+         `<td>${fmt1(D8.fimh)}</td><td>${fmt1(D8.alla)}</td></tr>`;
+  });
+  h += `</tbody><tfoot><tr><td colspan="2">Total période · moy. / jour</td><td>${fmt1(totPlan / days.length)} / j</td>` +
+       `<td>${fmt1(totFimN / days.length)} / j</td><td>${fmt(Math.round(HP))}</td><td>${fmt(Math.round(RP))}</td>` +
+       `<td>${fmt(Math.round(HPD))}</td><td>${fmt(Math.round(FM))}</td><td>${fmt1(AL)}</td></tr></tfoot>`;
+  $('t8').innerHTML = h;
+  /* matrice créneau × jour (personnes planifiées en prod) */
+  let hm = '<thead><tr><th>Créneau</th>' + days.map(d => `<th>${dShort(d)}</th>`).join('') + '<th>Moy. / jour</th></tr></thead><tbody>';
+  slots.forEach((s, i) => {
+    const vals = days.map(d => (P.m.prod[d] || [])[i] || 0);
+    hm += `<tr><td>${s}</td>` + vals.map(v => `<td>${v ? fmt1(v) : '·'}</td>`).join('') +
+      `<td><b>${fmt1(vals.reduce((a, b) => a + b, 0) / days.length)}</b></td></tr>`;
+  });
+  hm += '</tbody>';
+  $('t8m').innerHTML = hm;
+  $('h8').textContent = 'Personnes planifiées en prod = présence [Shift In, Shift Out) − pause repas · FIM (Compétences = FIM ou Total FIM = HP) compté hors prod · ' +
+    'allaitement déduit au prorata du shift · HP du fichier = shift − pause repas · heures en prod = HP − Total FIM − Allaitement.';
+  $('w8Src').textContent = 'Planification : ' + ((P.meta && P.meta.file) || 'importée') + ' · ' + days.length + ' j · ' +
+    slots[0] + ' → ' + slots[slots.length - 1] + ' · ' + (jourPrecis ? 'jour ' + dShort(d8) : 'moyenne période');
+}
+function bind8() {
+  $('w8V').addEventListener('change', r8);
+  $('w8D').addEventListener('change', r8);
+  RENDERS.p8 = r8;
+}
+
+/* =====================================================================
    AMORÇAGE
    ===================================================================== */
 async function boot() {
@@ -1616,6 +1928,12 @@ async function boot() {
       D.prev = await (await fetch('data/prevision.json', { cache: 'no-store' })).json();
       if (D.prev && D.prev.meta && D.prev.meta.file) D.meta.prev = D.prev.meta.file;
     } catch (e) { D.prev = null; }
+  }
+  if (!D.plan) {                                                    // planification (feuille Planning) : 1 fichier par onglet
+    try {
+      D.plan = await (await fetch('data/planning.json', { cache: 'no-store' })).json();
+      if (D.plan && D.plan.meta && D.plan.meta.file) D.meta.planA = D.plan.meta.file;
+    } catch (e) { D.plan = null; }
   }
   buildRoadmapCompat();
   bindUI();
@@ -1638,16 +1956,13 @@ function bindUI() {
     localStorage.removeItem(LS); location.reload();
   });
   bindImports();
-  bindPeriod('p2', r2); bindPeriod('p3', r3);
-  bindPeriod('p5', r5);
-  ['w1P', 'w1W', 'w1F', 's1U'].forEach(id => $(id).addEventListener('change', r1));
-  $('s2G').addEventListener('change', r2); $('s2F').addEventListener('change', r2); $('s2U').addEventListener('change', r2);
-  $('s3G').addEventListener('change', r3); $('s3F').addEventListener('change', r3);
+  bindGBar();
+  ['w1W', 'w1F', 's1U'].forEach(id => $(id).addEventListener('change', r1));
+  $('s2U').addEventListener('change', r2);
   RENDERS.p1 = r1; RENDERS.p2 = r2; RENDERS.p3 = r3;
   bind4();
   bind5();
-  bind6();
-  bind7();
+  bind8();
   boot2();
 }
 function boot2() { /* complété en partie 3 (page 5) */ }
@@ -1658,28 +1973,30 @@ function boot2() { /* complété en partie 3 (page 5) */ }
    volume créneau = volume du jour × poids du créneau (col. R, 730 = 07:30,
    profil « Lundi au samedi » ou « Dimanche » selon le jour choisi).
    ===================================================================== */
-function prevSeries(scope) {                            // séries du périmètre choisi
-  const agg = (c, fs) => ({ k: c, lbl: c === 'a' ? 'Appels' : 'Mails', col: c === 'a' ? '#3b5bdb' : '#f59f00',
-    cpl: fs.map(f => [c, f]), g: v => fs.reduce((s, f) => s + v[c][f], 0) });
-  if (scope === 'total') return [agg('a', PACTS), agg('m', PACTS)];
-  if (scope === 'appels') return PACTS.map(f => ({ k: 'a:' + f, lbl: PLBL[f], col: PCOL[f], cpl: [['a', f]], g: v => v.a[f] }));
-  if (scope === 'mails') return PACTS.map(f => ({ k: 'm:' + f, lbl: 'Mail ' + PLBL[f], col: PCOL[f], cpl: [['m', f]], g: v => v.m[f] }));
-  const [c, f] = scope.split(':');
-  return [{ k: scope, lbl: (c === 'm' ? 'Mail ' : '') + PLBL[f], col: PCOL[f], cpl: [[c, f]], g: v => v[c][f] }];
+function prevSeriesGF() {                            // séries selon les filtres globaux (canal × activité)
+  const out = [];
+  [['a', 'PHONE', 'appels'], ['m', 'MAIL', 'mails']].forEach(([ck, ch, mk]) => {
+    if (!effChanSet().has(ch)) return;
+    PACTS.forEach(f => {
+      if (GF.acts.length && !GF.acts.includes(PLBL[f])) return;
+      const tot = Object.keys(D.prev.mois || {}).reduce((s, mo) =>
+        s + (((D.prev.mois[mo] || { appels: {}, mails: {} })[mk] || {})[f] || 0), 0);
+      if (!tot) return;                              // pas de prévu pour ce couple canal × activité
+      out.push({ k: ck + ':' + f, lbl: (ck === 'm' ? 'Mail ' : '') + PLBL[f], col: PCOL[f],
+        mail: ck === 'm', cpl: [[ck, f]], g: v => v[ck][f] });
+    });
+  });
+  return out;
 }
 function fill4() {
-  const sM = $('w4M'), sF = $('w4F');
-  if (!prevHas()) { sM.innerHTML = '<option value="">—</option>'; sF.innerHTML = '<option value="">—</option>'; return; }
-  const curM = sM.value, curF = sF.value;
+  const sM = $('w4M');
+  if (!prevHas()) { sM.innerHTML = '<option value="">—</option>'; return; }
+  const curM = sM.value;
   sM.innerHTML = prevMonths().map(k => `<option value="${k}">${mLab(k)}</option>`).join('');
   const today = new Date().toISOString().slice(0, 10);
   const withP = prevMonths().filter(m => prevDayKeys(m).length);
   const defM = withP.includes(today.slice(0, 7)) ? today.slice(0, 7) : (withP[withP.length - 1] || prevMonths()[0]);
   sM.value = [...sM.options].some(o => o.value === curM) ? curM : defM;
-  const scopes = [['total', 'Total (appels + mails)'], ['appels', 'Appels — toutes activités'], ['mails', 'Mails — toutes activités'],
-    ...PACTS.map(f => ['a:' + f, PLBL[f] + ' (appels)']), ...PACTS.map(f => ['m:' + f, 'Mail ' + PLBL[f]])];
-  sF.innerHTML = scopes.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
-  sF.value = scopes.some(s => s[0] === curF) ? curF : 'total';
 }
 function defSlotDay() {                                 // jour du détail créneau : le plus chargé du mois
   const m = $('w4M').value, days = prevDayKeys(m), cur = $('w4D').value;
@@ -1697,9 +2014,19 @@ function r4() {
   $('p4empty').style.display = has ? 'none' : '';
   if (!has) { $('w4Src').textContent = 'Prévision Webhelp : à importer'; return; }
   const m = $('w4M').value || prevMonths()[0];
-  const scope = $('w4F').value || 'total';
-  const series = prevSeries(scope);
-  const scopeLbl = $('w4F').selectedOptions[0] ? $('w4F').selectedOptions[0].textContent : scope;
+  const series = prevSeriesGF();
+  const scopeLbl = gfLbl();
+  if (!series.length) {
+    ['c4a', 'c4b'].forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] }, options: { maintainAspectRatio: false } }));
+    $('k4').innerHTML = kpi('Prévision', '—', 'aucune série pour ' + gfLbl() + ' — canal non couvert par la prévision Webhelp');
+    ['t4a', 't4b', 't4c', 't4d'].forEach(id => $(id).textContent = '—');
+    $('h4a').textContent = 'Ajustez les filtres Flux / Channel / Activités (canal Chat non couvert par la prévision Webhelp).';
+    $('h4b').textContent = ''; $('h4m').textContent = '';
+    $('ta4').innerHTML = '<tbody><tr><td>—</td></tr></tbody>'; $('tb4').innerHTML = '<tbody><tr><td>—</td></tr></tbody>';
+    $('tm4').innerHTML = '';
+    $('w4Src').textContent = 'Prévision Webhelp : aucune série pour ce périmètre';
+    return;
+  }
   const days = prevDayKeys(m);
   const vols = days.map(d => prevDayVol(m, d));
   const sData = series.map(s => vols.map(v => s.g(v)));
@@ -1715,8 +2042,8 @@ function r4() {
     : 'Poids journaliers absents pour ' + mLab(m) + ' — le classeur importé ne couvre pas ce mois.';
   if (days.length) {
     mkChart('c4a', { type: 'bar', data: { labels: days.map(dShort), datasets: series.map((s, si) => ({
-        label: s.lbl, data: sData[si], backgroundColor: s.col + (series.length > 1 ? 'cc' : ''), borderRadius: 3,
-        stack: 's', borderWidth: series.length > 1 ? 0 : 0 })) },
+        label: s.lbl, data: sData[si], backgroundColor: s.mail ? s.col + '55' : s.col, borderColor: s.mail ? s.col : 'transparent',
+        borderWidth: s.mail ? 1 : 0, borderRadius: 3, stack: 's' })) },
       options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt(c.parsed.y) } } },
         scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
@@ -1766,7 +2093,8 @@ function r4() {
     : 'Créneaux 30 min non disponibles pour ce jour / ce mois (profil « ' + (prof === 'dim' ? 'Dimanche' : 'Lundi au samedi') + ' »).';
   if (hasCre) {
     mkChart('c4b', { type: 'bar', data: { labels: sV.map(slotLab), datasets: series.map((s, si) => ({
-        label: s.lbl, data: sDataV[si], backgroundColor: s.col + (series.length > 1 ? 'cc' : ''), borderRadius: 3, stack: 's' })) },
+        label: s.lbl, data: sDataV[si], backgroundColor: s.mail ? s.col + '55' : s.col, borderColor: s.mail ? s.col : 'transparent',
+        borderWidth: s.mail ? 1 : 0, borderRadius: 3, stack: 's' })) },
       options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y) } } },
         scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
@@ -1786,17 +2114,18 @@ function r4() {
   $('tb4').innerHTML = hc || '<tbody><tr><td>—</td></tr></tbody>';
 
   /* ---- KPIs ---- */
-  const moisAll = f => { const mo = (D.prev.mois || {})[m] || { appels: {}, mails: {} };
-    return PACTS.reduce((s, ff) => s + (mo[f][ff] || 0), 0); };
+  const moisTot = series.reduce((s, sr) => s + sr.cpl.reduce((x, [c, f]) =>
+    x + (((D.prev.mois || {})[m] || { appels: {}, mails: {} })[c === 'a' ? 'appels' : 'mails'][f] || 0), 0), 0);
+  const hasBoth = series.some(s => !s.mail) && series.some(s => s.mail);
   $('k4').innerHTML =
-    kpi('Prévu ' + mLab(m), fmt(days.length ? sumAll : (scope === 'mails' ? moisAll('mails') : scope === 'total' ? moisAll('a') + moisAll('m') : moisAll(scope === 'appels' || scope.startsWith('a:') ? 'appels' : 'mails'))),
+    kpi('Prévu ' + mLab(m), fmt(days.length ? sumAll : moisTot),
       scopeLbl + (D.prev.meta && D.prev.meta.snapshot ? ' · prévision au ' + dShort(D.prev.meta.snapshot) : '')) +
     (days.length ? kpi('Moyenne / jour', fmt(sumAll / days.length), days.length + ' jours pondérés') : '') +
     (days.length && tot[iMax] ? kpi('Jour le plus chargé', fmt(tot[iMax]), dShort(days[iMax]) + ' · ' + jJours(days[iMax])) : '') +
     (hasCre ? kpi('Pointe 30 min', fmt(totV[iMaxC]), slotLab(sV[iMaxC]) + ' · ' + dShort(daySel) + ' (' + jJours(daySel) + ')') : '') +
-    (scope === 'total' && days.length ? (() => {
-      const a = PACTS.reduce((s, f) => s + vols.reduce((x, v) => x + v.a[f], 0), 0);
-      const mm = PACTS.reduce((s, f) => s + vols.reduce((x, v) => x + v.m[f], 0), 0);
+    (hasBoth && days.length ? (() => {
+      const a = series.filter(s => !s.mail).reduce((s, sr) => s + vols.reduce((x, v) => x + sr.g(v), 0), 0);
+      const mm = series.filter(s => s.mail).reduce((s, sr) => s + vols.reduce((x, v) => x + sr.g(v), 0), 0);
       return kpi('Répartition', pctS(a, a + mm), 'appels ' + fmt(a) + ' · mails ' + fmt(mm)); })() : '');
 
   /* ---- synthèse mensuelle ---- */
@@ -1826,28 +2155,19 @@ function r4() {
 }
 function bind4() {
   $('w4M').addEventListener('change', () => { defSlotDay(); r4(); });
-  $('w4F').addEventListener('change', r4);
   $('w4D').addEventListener('change', r4);
   $('w4P').addEventListener('change', r4);
   RENDERS.p4 = r4;
 }
 
 /* =====================================================================
-   P5 — PRODUCTIVITÉ (Phone / Mail / Chat, par activité)
+   P5 — PRODUCTIVITÉ (sections par canal selon les filtres globaux)
+   Phone : DRM + Vonage · Mail : Export Mail · Chat : pas encore raccordé
    QS = traités/reçus · QP = reçus/prévision · QS<60s · QE si QP>115% · T/P
    DMT · Productivité = traités / heure de traitement · TO = traitement / heures planifiées
    ===================================================================== */
 const tauxChip = t => t >= 65 ? 'g' : t >= 50 ? 'a' : 'r';   /* taux < 60 s (qualité) */
 const tauxReal = t => t >= 95 ? 'g' : t >= 80 ? 'a' : 'r';   /* taux d'occupation / couverture */
-
-function fill5Acts() {                                              // activités du sélecteur selon le canal
-  const c = $('s5C').value;
-  let acts = [];
-  if (c === 'phone') acts = [...new Set([...RFLOW, ...(D.dmt.flows || [])])];
-  else if (c === 'mail') acts = (D.mail.flows || []).slice();
-  $('s5F').innerHTML = '<option value="">Toutes les activités</option>' +
-    acts.map(a => `<option value="${a}">${a}</option>`).join('');
-}
 function planHoursOf(act, d) {                                      // heures planifiées (match insensible à la casse)
   const P = D.planH, ai = P.dates.indexOf(d);
   if (ai < 0) return 0;
@@ -1883,36 +2203,55 @@ function ch5(canal) {                                               // adaptateu
         return { rec, tr, t60, h, n };
       },
       prev(f, d) {
+        const w = whPrevDay(actKeyOf(f).toLowerCase(), 'a', d);      // prévision Webhelp × poids journaliers
+        if (w != null) return w;
         const rm = D.roadmap.find(x => norm(x.a) === norm(f) && norm(x.c) === 'voix');
-        return rm ? (rm.prev[isoWeek(d) - 1] || 0) / 7 : 0;          // prévision hebdo répartie / jour
+        return rm ? (rm.prev[isoWeek(d) - 1] || 0) / 7 : 0;          // repli : roadmap hebdo ÷ 7
       },
       dmt: v => v.n ? v.h * 3600 / v.n : null
     };
   }
   return null;                                                      // chat : pas encore de source
 }
-function r5() {
-  const canal = $('s5C').value;
-  const C = ch5(canal);
-  if (!C || !C.has) {
-    $('p5body').style.display = 'none';
-    const em = $('p5empty'); em.style.display = '';
-    $('p5emptyT').textContent = canal === 'chat' ? 'Canal Chat — pas encore de source raccordée.' : (C ? C.emptyMsg[0] : 'Aucune donnée.');
-    $('p5emptyS').textContent = canal === 'chat'
-      ? 'Les exports nécessaires (plateforme de chat) ne sont pas encore définis. Les indicateurs QS, QP, QE, DMT, productivité et taux d\'occupation s\'afficheront dès le raccordement.'
-      : (C ? C.emptyMsg[1] : '');
-    $('w5Src').textContent = canal === 'phone' ? 'Phone : à importer (DRM · Vonage)' : canal === 'mail' ? 'Mail : à importer (Export Mail)' : 'Chat : —';
-    ['c5a', 'c5b', 'c5c'].forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
-    return;
+function r5() {                                     // une section par canal retenu par les filtres globaux
+  const EC = effChanSet();
+  const chans = [];
+  if (EC.has('PHONE')) chans.push('phone');
+  if (EC.has('MAIL')) chans.push('mail');
+  if (EC.has('CHAT')) chans.push('chat');
+  const host = $('p5body'); host.innerHTML = '';
+  const sums = [];
+  chans.forEach(c => { const s = r5Canal(c); if (s) sums.push(s); });
+  $('p5empty').style.display = sums.length ? 'none' : '';
+  if (!sums.length) {
+    $('p5emptyT').textContent = 'Aucune donnée Productivité pour ce périmètre.';
+    $('p5emptyS').textContent = 'Ajustez les filtres Flux / Channel / Activités, ou importez les sources (DRM, Export Vonage Call, Export Mail, Prévision Mail).';
   }
-  $('p5body').style.display = ''; $('p5empty').style.display = 'none';
-  const fsel = $('s5F').value;
-  const acts = fsel ? C.acts.filter(a => norm(a) === norm(fsel)) : C.acts;
+  $('w5Src').textContent = sums.length ? sums.join(' · ') : 'Productivité : aucune donnée';
+}
+function r5Canal(canal) {                           // section d'un canal ; renvoie le résumé ou null
+  const C = ch5(canal);
+  const lbl = canal === 'phone' ? 'Phone' : canal === 'mail' ? 'Mail' : 'Chat';
+  const div = document.createElement('div');
+  $('p5body').appendChild(div);
+  if (!C || !C.has) {
+    const msg = canal === 'phone' ? ['Aucune donnée Phone.', 'Importez le DRM (réalisé) et/ou l\'Export Vonage Call (DMT) via le bouton Importer.']
+      : canal === 'mail' ? ['Aucune donnée Mail.', 'Importez un « Export Mail » (une ligne par courriel) et la « Prévision Mail » via le bouton Importer.']
+      : ['Canal Chat — pas encore de source raccordée.', 'Les exports nécessaires (plateforme de chat) ne sont pas encore définis. Les indicateurs QS, QP, QE, DMT, productivité et taux d\'occupation s\'afficheront dès le raccordement.'];
+    div.innerHTML = `<div class="card" style="padding:20px"><b>${lbl} — ${msg[0]}</b><br><span class="hint">${msg[1]}</span></div>`;
+    return null;
+  }
+  const acts = C.acts.filter(a => gfPass(a, canal === 'mail' ? 'MAIL' : 'PHONE'));
   const idx = C.dates.map((d, i) => [d, i]).filter(([d]) => inPer('p5', d)).map(([, i]) => i);
-  if (!idx.length) { noPer('p5', 'k5', ['c5a', 'c5b', 'c5c']); $('k5b').innerHTML = ''; $('t5').innerHTML = '';
-    $('w5Src').textContent = 'Aucun jour sur ' + rangeLbl(...perRange('p5')); return; }
-  const rl = rangeLbl(...perRange('p5'));
-  const canalLbl = canal === 'phone' ? 'Phone' : 'Mail';
+  const rl = rangeLbl(...perRange());
+  if (!acts.length || !idx.length) {
+    div.innerHTML = `<div class="card" style="padding:20px"><b>${lbl} — ${!acts.length
+      ? 'aucune activité dans ce périmètre (ajustez les filtres Flux / Channel / Activités).'
+      : 'aucune donnée sur la période (élargissez la Période ou l\'Intervalle).'}</b></div>`;
+    return null;
+  }
+  const ids = s => s + '_' + canal;
+  const canalLbl = lbl;
   const labels = idx.map(i => C.dates[i].slice(8, 10) + '/' + C.dates[i].slice(5, 7));
 
   /* séries journalières (activités du filtre) */
@@ -1944,8 +2283,18 @@ function r5() {
   const PRODp = H ? TR / H : null;
   const TOp = PH ? Math.min(999, Math.round(H / PH * 100)) : null;
 
+  div.innerHTML = `<h2 style="font-size:15.5px;font-weight:750;color:#2a3555;margin:4px 0 10px">Canal ${canalLbl} · ${rl} · ${gfLbl()}</h2>
+    <div class="kpis" id="${ids('k5')}"></div>
+    <div class="kpis" id="${ids('k5b')}"></div>
+    <div class="grid2">
+      <div class="card"><h3>Journalier — reçus / traités / prévision</h3><div class="charthold tall"><canvas id="${ids('c5a')}"></canvas></div></div>
+      <div class="card"><h3>Qualité journalière — QS · QS &lt; 60 s · QP · T/P</h3><div class="charthold tall"><canvas id="${ids('c5b')}"></canvas></div></div>
+    </div>
+    <div class="card"><h3>Répartition par activité — traités de la période</h3><div class="charthold"><canvas id="${ids('c5c')}"></canvas></div></div>
+    <div class="card"><h3>Détail jour × activité — tous les indicateurs</h3><div class="tblwrap"><table id="${ids('t5')}"></table></div></div>`;
+
   /* KPIs — indicateurs */
-  $('k5').innerHTML =
+  $(ids('k5')).innerHTML =
     kpi('QS — qualité de service', QS == null ? '—' : QS + ' %', 'traités / reçus · ' + rl) +
     kpi('QP — qualité de production', QP == null ? '—' : QP + ' %', PV ? 'reçus / prévision' : 'prévision non disponible') +
     kpi('QE — efficacité', QE == null ? '—' : QE + ' %', QP != null && QP > 115 ? 'QP > 115 % : (traités / prévision) × 92 %' : 'applicable si QP > 115 %') +
@@ -1954,15 +2303,15 @@ function r5() {
     kpi("Taux d'occupation", TOp == null ? '—' : TOp + ' %', PH ? 'temps de traitement / heures planifiées' : 'heures planifiées non importées', TOp != null ? Math.min(100, TOp) : 0);
 
   /* KPIs — nombres */
-  $('k5b').innerHTML =
-    kpi('Contacts traités', fmt(TR), idx.length + ' jour' + (idx.length > 1 ? 's' : '') + (fsel ? ' · ' + fsel : ' · toutes activités')) +
+  $(ids('k5b')).innerHTML =
+    kpi('Contacts traités', fmt(TR), idx.length + ' jour' + (idx.length > 1 ? 's' : '') + ' · ' + gfLbl()) +
     kpi('Contacts reçus', fmt(REC), canal === 'mail' ? 'courriels acceptés' : 'contacts reçus (DRM)') +
     kpi('Prévision de contacts', PV ? fmt(Math.round(PV)) : '—',
-        canal === 'phone' ? 'Roadmap (prévision hebdo ÷ 7)' : canal === 'mail' ? ((D.pmail && D.pmail.rows.length) ? (D.meta.pmail || D.pmail.file) : 'import « Prévision Mail »') : '—') +
+        canal === 'phone' ? (prevHas() ? 'Prévision Webhelp × poids journaliers' : 'Roadmap (prévision hebdo ÷ 7)') : canal === 'mail' ? ((D.pmail && D.pmail.rows.length) ? (D.meta.pmail || D.pmail.file) : 'import « Prévision Mail »') : '—') +
     kpi('Heures de traitement', hhDur(H * 3600), 'somme des temps de traitement');
 
   /* graphique : journalier reçus / traités / prévision */
-  mkChart('c5a', { type: 'bar', data: { labels, datasets: [
+  mkChart(ids('c5a'), { type: 'bar', data: { labels, datasets: [
       { label: 'Reçus', data: recJ, backgroundColor: 'rgba(59,91,219,.35)', borderRadius: 3 },
       { label: 'Traités', data: trJ, backgroundColor: '#3b5bdb', borderRadius: 3 },
       ...(PV ? [{ label: 'Prévision', data: pvJ.map(v => Math.round(v)), type: 'line', borderColor: '#f59f00', borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .3 }] : [])] },
@@ -1975,7 +2324,7 @@ function r5() {
   const axP5 = { beginAtZero: true, grid: GRID, ticks: { callback: v => v + ' %' } };
   const ln = (lab, data, col, dash) => ({ label: lab, data, borderColor: col, backgroundColor: 'transparent',
     borderDash: dash ? [5, 4] : [], borderWidth: 2, pointRadius: 1.5, tension: .3, spanGaps: true });
-  mkChart('c5b', { type: 'line', data: { labels, datasets: [
+  mkChart(ids('c5b'), { type: 'line', data: { labels, datasets: [
       ln('QS', qsJ, '#0ca678'), ln('QS < 60 s', q60J, '#3b5bdb'),
       ln('QP', qpJ, '#f59f00', true), ln('T/P', tpJ, '#7048e8')] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
@@ -1985,7 +2334,7 @@ function r5() {
 
   /* graphique : répartition par activité (traités) */
   const byA = acts.map(a => { let s = 0; idx.forEach(i => s += C.get(a, i).tr); return s; });
-  mkChart('c5c', { type: 'doughnut',
+  mkChart(ids('c5c'), { type: 'doughnut',
     data: { labels: acts, datasets: [{ data: byA, backgroundColor: acts.map((a, i) => RCOL[a.toUpperCase()] || PAL[i % PAL.length]), borderWidth: 2, borderColor: '#fff' }] },
     options: { maintainAspectRatio: false, cutout: '58%',
       plugins: { legend: { position: 'right' },
@@ -2017,7 +2366,7 @@ function r5() {
     });
   });
   if (!rowsN) h += '<tr><td colspan="15" style="text-align:center;color:#6b7594">Aucune donnée sur la période</td></tr>';
-  h += '</tbody><tfoot><tr><td colspan="3">Total période' + (fsel ? ' · ' + fsel : '') + '</td>' +
+  h += '</tbody><tfoot><tr><td colspan="3">Total période · ' + gfLbl() + '</td>' +
        `<td>${fmt(REC)}</td><td>${fmt(TR)}</td><td>${PV ? fmt(Math.round(PV)) : '—'}</td>` +
        `<td>${QS == null ? '—' : QS + ' %'}</td><td>${QP == null ? '—' : QP + ' %'}</td>` +
        `<td>${QS60 == null ? '—' : QS60 + ' %'}</td><td>${TPp == null ? '—' : TPp + ' %'}</td>` +
@@ -2026,110 +2375,18 @@ function r5() {
        `<td>${DMTp == null ? '—' : sec(DMTp) + ' s'}</td>` +
        `<td>${PRODp ? fmt1(PRODp) : '—'}</td>` +
        `<td>${TOp == null ? '—' : TOp + ' %'}</td></tr></tfoot>`;
-  $('t5').innerHTML = h;
-  $('w5Src').textContent = canalLbl + ' : ' + idx.length + ' j · ' + rl + (fsel ? ' · ' + fsel : ' · toutes activités');
+  $(ids('t5')).innerHTML = h;
+  return canalLbl + ' : ' + idx.length + ' j · ' + rl;
 }
 
 function bind5() {
-  $('s5C').addEventListener('change', () => { fill5Acts(); r5(); });
-  $('s5F').addEventListener('change', r5);
-  bindPeriod('p5', r5);
   RENDERS.p5 = r5;
 }
 
 /* =====================================================================
-   P6 — DMT (Export Vonage Call : durée moyenne de traitement par jour × activité)
-   DMT = (communication + after-call work) / appels répondus
-   ===================================================================== */
-function r6() {
-  const M = D.dmt;
-  const has = M.dates.length > 0;
-  $('p6body').style.display = has ? '' : 'none';
-  $('p6empty').style.display = has ? 'none' : '';
-  if (!has) { $('w6Src').textContent = 'Export Vonage : à importer'; return; }
-  const idx = M.dates.map((d, i) => [d, i]).filter(([d]) => inPer('p6', d)).map(([, i]) => i);
-  if (!idx.length) { noPer('p6', 'k6', ['c6a', 'c6b'], 't6');
-    $('w6Src').textContent = 'DMT : aucun jour sur ' + rangeLbl(...perRange('p6')); return; }
-  const rl = rangeLbl(...perRange('p6'));
-  const fsel = $('s6F').value;
-  const flows = fsel ? [fsel] : M.flows;
-  const durOf = (f, i) => (M.f[f].com[i] || 0) + (M.f[f].acw[i] || 0);
-
-  /* séries journalières */
-  const labels = idx.map(i => M.dates[i].slice(8, 10) + '/' + M.dates[i].slice(5, 7));
-  const per = f => idx.map(i => M.f[f].n[i] > 0 ? durOf(f, i) / M.f[f].n[i] : null);
-  const globAll = idx.map(i => { let n = 0, dur = 0;
-    M.flows.forEach(f => { n += M.f[f].n[i]; dur += durOf(f, i); }); return n ? dur / n : null; });
-
-  /* agrégats de période */
-  let N = 0, COM = 0, ACW = 0;
-  flows.forEach(f => idx.forEach(i => { N += M.f[f].n[i]; COM += M.f[f].com[i]; ACW += M.f[f].acw[i]; }));
-  const dmtG = N ? (COM + ACW) / N : 0;
-  const avg = M.flows.map(f => { let n = 0, dur = 0; idx.forEach(i => { n += M.f[f].n[i]; dur += durOf(f, i); }); return n ? dur / n : 0; });
-  const slowI = avg.indexOf(Math.max(...avg));
-  let GN = 0, GDUR = 0;
-  M.flows.forEach(f => idx.forEach(i => { GN += M.f[f].n[i]; GDUR += durOf(f, i); }));
-  const dmtAll = GN ? GDUR / GN : 0;
-
-  /* KPIs */
-  $('k6').innerHTML =
-    kpi('DMT moyenne', sec(dmtG) + ' s', rl + (fsel ? ' · ' + fsel : ' · toutes activités') + ' · secondes / appel') +
-    kpi('Communication moy.', sec(N ? COM / N : 0) + ' s', 'temps de conversation') +
-    kpi('After-call moy.', sec(N ? ACW / N : 0) + ' s', 'tâches après appel') +
-    kpi('Appels répondus', fmt(N), idx.length + ' jour' + (idx.length > 1 ? 's' : '') + ' d\'activité') +
-    (fsel ? '' : kpi('Activité la plus lente', M.flows[slowI] || '—', 'DMT moy. ' + sec(avg[slowI]) + ' s'));
-
-  /* graphique : DMT par jour × activité */
-  const axisSec = { beginAtZero: true, grid: GRID, ticks: { precision: 0 }, title: { display: true, text: 'secondes' } };
-  mkChart('c6a', { type: 'line', data: { labels, datasets: [
-      ...flows.map(f => ({ label: f, data: per(f),
-        borderColor: RCOL[f] || PAL[M.flows.indexOf(f) % PAL.length], backgroundColor: 'transparent',
-        borderWidth: 2, pointRadius: 2, tension: .3, spanGaps: true })),
-      ...(fsel ? [] : [{ label: 'Global', data: globAll, borderColor: '#1b2440', backgroundColor: 'transparent',
-        borderWidth: 2.5, borderDash: [6, 4], pointRadius: 0, tension: .3, spanGaps: true }])] },
-    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'bottom' },
-        tooltip: { callbacks: { label: c => c.parsed.y == null ? null : ' ' + c.dataset.label + ' : ' + sec(c.parsed.y) + ' s' } } },
-      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisSec } } });
-
-  /* graphique : moyenne période par activité (communication + after-call empilés) */
-  const comA = M.flows.map(f => { let n = 0, c = 0; idx.forEach(i => { n += M.f[f].n[i]; c += M.f[f].com[i]; }); return n ? c / n : 0; });
-  const acwA = M.flows.map(f => { let n = 0, a = 0; idx.forEach(i => { n += M.f[f].n[i]; a += M.f[f].acw[i]; }); return n ? a / n : 0; });
-  mkChart('c6b', { type: 'bar', data: { labels: M.flows, datasets: [
-      { label: 'Communication', data: comA, backgroundColor: '#3b5bdb', borderRadius: 3 },
-      { label: 'After-call work', data: acwA, backgroundColor: '#f59f00', borderRadius: 3 }] },
-    options: { indexAxis: 'y', maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom' },
-        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + sec(c.parsed.x) + ' s' } } },
-      scales: { x: { stacked: true, grid: GRID, ticks: { precision: 0 }, title: { display: true, text: 'secondes' } },
-                y: { stacked: true, grid: { display: false } } } } });
-
-  /* tableau : jour × activité */
-  let h = '<thead><tr><th>Date</th><th>Jour</th>' + M.flows.map(f => `<th>${f}</th>`).join('') + '<th>Global</th></tr></thead><tbody>';
-  idx.forEach((i, j) => {
-    const d = M.dates[i];
-    h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td>` +
-      M.flows.map(f => { const n = M.f[f].n[i]; return `<td>${n ? sec(durOf(f, i) / n) : '—'}</td>`; }).join('') +
-      `<td><b>${globAll[j] != null ? sec(globAll[j]) : '—'}</b></td></tr>`;
-  });
-  h += '</tbody><tfoot><tr><td colspan="2">Moyenne période</td>' +
-    avg.map(a => `<td>${a ? sec(a) : '—'}</td>`).join('') +
-    `<td>${dmtAll ? sec(dmtAll) : '—'}</td></tr></tfoot>`;
-  $('t6').innerHTML = h;
-
-  $('w6Src').textContent = 'DMT : ' + (D.meta.dmt || M.file) + ' · ' + idx.length + ' j · ' + rl;
-}
-
-function bind6() {
-  $('s6F').addEventListener('change', r6);
-  bindPeriod('p6', r6);
-  RENDERS.p6 = r6;
-}
-
-/* =====================================================================
-   P7 — MAIL (Export Mail : réalisé du canal mail, par jour × activité)
-   QS = traités/reçus · QP = reçus/prévision · QS<60s = traités<60s/reçus
-   QE = si QP>115% : (traités/prévision)×92% · T/P = traités/prévision
+   P7 — MAIL (les onglets DMT et Mail ont été retirés : les données restent
+   importées pour l'onglet Productivité — Phone utilise l'Export Vonage Call,
+   Mail l'Export Mail + Prévision Mail)
    ===================================================================== */
 const hhDur = s => { s = Math.round(s || 0); let h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
   if (m === 60) { h++; m = 0; } return h + ' h ' + String(m).padStart(2, '0'); };
@@ -2140,122 +2397,6 @@ function prevMailMap() {                                           // flux norma
   });
   return PM;
 }
-function r7() {
-  const M = D.mail;
-  const has = M.dates.length > 0;
-  $('p7body').style.display = has ? '' : 'none';
-  $('p7empty').style.display = has ? 'none' : '';
-  if (!has) { $('w7Src').textContent = 'Export Mail : à importer'; return; }
-  const idx = M.dates.map((d, i) => [d, i]).filter(([d]) => inPer('p7', d)).map(([, i]) => i);
-  if (!idx.length) { noPer('p7', 'k7', ['c7a', 'c7b'], 't7'); $('k7b').innerHTML = '';
-    $('w7Src').textContent = 'Mail : aucun jour sur ' + rangeLbl(...perRange('p7')); return; }
-  const rl = rangeLbl(...perRange('p7'));
-  const fsel = $('s7F').value;
-  const flows = fsel ? [fsel] : M.flows;
-  const PM = prevMailMap();
-  const prevOf = (f, d) => { const p = PM[norm(f)]; return p ? (p[d] || 0) : 0; };
 
-  /* séries journalières */
-  const labels = idx.map(i => M.dates[i].slice(8, 10) + '/' + M.dates[i].slice(5, 7));
-  const recJ = idx.map(i => flows.reduce((s, f) => s + (M.f[f].rec[i] || 0), 0));
-  const trJ  = idx.map(i => flows.reduce((s, f) => s + (M.f[f].tr[i] || 0), 0));
-  const t60J = idx.map(i => flows.reduce((s, f) => s + (M.f[f].t60[i] || 0), 0));
-  const pvJ  = idx.map(i => flows.reduce((s, f) => s + prevOf(f, M.dates[i]), 0));
-  const q = (a, b) => b ? Math.round(a / b * 100) : null;          // ratio en % ou null
-  const qsJ  = trJ.map((v, j) => q(v, recJ[j]));
-  const q60J = t60J.map((v, j) => q(v, recJ[j]));
-  const qpJ  = pvJ.map((v, j) => q(recJ[j], v));
-  const tpJ  = pvJ.map((v, j) => q(trJ[j], v));
-
-  /* agrégats de période */
-  let REC = 0, TR = 0, T60 = 0, DEL = 0, PV = 0;
-  flows.forEach(f => idx.forEach(i => { REC += M.f[f].rec[i] || 0; TR += M.f[f].tr[i] || 0;
-    T60 += M.f[f].t60[i] || 0; DEL += M.f[f].del[i] || 0; PV += prevOf(f, M.dates[i]); }));
-  const QS = q(TR, REC), QS60 = q(T60, REC), QP = q(REC, PV), TP = q(TR, PV);
-  const QE = (QP != null && QP > 115) ? Math.round(TR / PV * 92) : null;
-
-  /* perdus file -50s : colonne SLA-50 de l'Export Vonage (via l'import DMT) */
-  const L = D.dmt; let lost = null;
-  if (L.dates && L.dates.length) {
-    lost = 0;
-    idx.forEach(i => { const li = L.dates.indexOf(M.dates[i]); if (li < 0) return;
-      L.flows.forEach(f => { if (fsel && norm(f) !== norm(fsel)) return;
-        lost += (L.f[f].lost && L.f[f].lost[li]) || 0; }); });
-  }
-
-  /* KPIs — indicateurs de performance */
-  $('k7').innerHTML =
-    kpi('QS — qualité de service', QS == null ? '—' : QS + ' %', 'traités / reçus · ' + rl + (fsel ? ' · ' + fsel : '')) +
-    kpi('QP — qualité de production', QP == null ? '—' : QP + ' %', PV ? 'reçus / prévision' : 'reçus / prévision · prévision non importée') +
-    kpi('QS < 60 s', QS60 == null ? '—' : QS60 + ' %', 'traités < 60 s / reçus') +
-    kpi('QE — efficacité', QE == null ? '—' : QE + ' %', QP != null && QP > 115 ? 'QP > 115 % : (traités / prévision) × 92 %' : 'applicable si QP > 115 %') +
-    kpi('T/P — traités / prévision', TP == null ? '—' : TP + ' %', PV ? 'production vs prévision' : 'prévision non importée');
-
-  /* KPIs — nombres */
-  $('k7b').innerHTML =
-    kpi('Contacts traités', fmt(TR), idx.length + ' jour' + (idx.length > 1 ? 's' : '') + (fsel ? ' · ' + fsel : ' · toutes activités')) +
-    kpi('Contacts reçus', fmt(REC), 'courriels acceptés') +
-    kpi('Prévision de contacts', PV ? fmt(PV) : '—', (D.pmail && D.pmail.rows.length) ? (D.meta.pmail || D.pmail.file) : 'import « Prévision Mail »') +
-    kpi('Perdus file -50s', lost == null ? '—' : fmt(lost), 'colonne SLA-50 (Export Vonage)') +
-    kpi('Heures de traitement', hhDur(DEL), 'somme des délais de traitement') +
-    kpi('DMT', TR ? sec(DEL / TR) + ' s' : '—', 'délai moyen par traité');
-
-  /* graphique : journalier reçus / traités / prévision */
-  mkChart('c7a', { type: 'bar', data: { labels, datasets: [
-      { label: 'Reçus', data: recJ, backgroundColor: '#3b5bdb', borderRadius: 3 },
-      { label: 'Traités', data: trJ, backgroundColor: '#0ca678', borderRadius: 3 },
-      ...(PV ? [{ label: 'Prévision', data: pvJ, type: 'line', borderColor: '#f59f00',
-        borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .3 }] : [])] },
-    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'bottom' },
-        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt(c.parsed.y ?? c.parsed) } } },
-      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisY('courriels') } } });
-
-  /* graphique : qualité journalière (%) */
-  const axP7 = { beginAtZero: true, grid: GRID, ticks: { callback: v => v + ' %' } };
-  const ln = (lab, data, col, dash) => ({ label: lab, data, borderColor: col, backgroundColor: 'transparent',
-    borderDash: dash ? [5, 4] : [], borderWidth: 2, pointRadius: 1.5, tension: .3, spanGaps: true });
-  mkChart('c7b', { type: 'line', data: { labels, datasets: [
-      ln('QS', qsJ, '#0ca678'), ln('QS < 60 s', q60J, '#3b5bdb'),
-      ln('QP', qpJ, '#f59f00', true), ln('T/P', tpJ, '#7048e8')] },
-    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'bottom' },
-        tooltip: { callbacks: { label: c => c.parsed.y == null ? null : ' ' + c.dataset.label + ' : ' + Math.round(c.parsed.y) + ' %' } } },
-      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axP7 } } });
-
-  /* tableau : jour × activité — tous les indicateurs */
-  let h = '<thead><tr><th>Date</th><th>Jour</th><th>Activité</th><th>Reçus</th><th>Traités</th><th>Prévision</th>' +
-          '<th>QS</th><th>QP</th><th>QS &lt; 60 s</th><th>T/P</th><th>QE</th><th>Heures</th><th>DMT</th></tr></thead><tbody>';
-  idx.forEach(i => { const d = M.dates[i];
-    flows.forEach(f => {
-      const rec = M.f[f].rec[i] || 0, tr = M.f[f].tr[i] || 0, t60 = M.f[f].t60[i] || 0, del = M.f[f].del[i] || 0;
-      const pv = prevOf(f, d);
-      if (!rec && !tr && !pv) return;
-      const qp = q(rec, pv), tp = q(tr, pv), qe = (qp != null && qp > 115) ? Math.round(tr / pv * 92) : null;
-      h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td><td>${f}</td><td>${rec ? fmt(rec) : '—'}</td>` +
-           `<td>${tr ? fmt(tr) : '—'}</td><td>${pv ? fmt(pv) : '—'}</td>` +
-           `<td>${pctS(tr, rec)}</td><td>${qp == null ? '—' : qp + ' %'}</td>` +
-           `<td>${pctS(t60, rec)}</td><td>${tp == null ? '—' : tp + ' %'}</td>` +
-           `<td>${qe == null ? '—' : qe + ' %'}</td>` +
-           `<td>${del ? fmt1(del / 3600) + ' h' : '—'}</td><td>${tr ? sec(del / tr) + ' s' : '—'}</td></tr>`;
-    });
-  });
-  h += '</tbody><tfoot><tr><td colspan="3">Total période</td>' +
-       `<td>${fmt(REC)}</td><td>${fmt(TR)}</td><td>${PV ? fmt(PV) : '—'}</td>` +
-       `<td>${QS == null ? '—' : QS + ' %'}</td><td>${QP == null ? '—' : QP + ' %'}</td>` +
-       `<td>${QS60 == null ? '—' : QS60 + ' %'}</td><td>${TP == null ? '—' : TP + ' %'}</td>` +
-       `<td>${QE == null ? '—' : QE + ' %'}</td>` +
-       `<td>${DEL ? fmt1(DEL / 3600) + ' h' : '—'}</td><td>${TR ? sec(DEL / TR) + ' s' : '—'}</td></tr></tfoot>`;
-  $('t7').innerHTML = h;
-
-  $('w7Src').textContent = 'Mail : ' + (D.meta.mail || M.file) + ' · ' + idx.length + ' j · ' + rl +
-    ((D.pmail && D.pmail.rows.length) ? ' · prévision : ' + (D.meta.pmail || D.pmail.file) : '');
-}
-
-function bind7() {
-  $('s7F').addEventListener('change', r7);
-  bindPeriod('p7', r7);
-  RENDERS.p7 = r7;
-}
 
 boot();
