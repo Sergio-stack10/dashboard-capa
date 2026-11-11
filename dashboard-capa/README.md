@@ -11,7 +11,7 @@ Déploiement : Cloudflare Workers (déploiement manuel ou Git integration).
 | `js/app.js` | Logique applicative (données, imports, graphiques, filtres globaux) |
 | `data/roadmap.json` | **Onglet Roadmap** : modèle RM complet (1 fichier par onglet) — 21 sections × 12 activités × 113 semaines |
 | `data/prevision.json` | **Onglet Prévision** : prévus mensuels Webhelp (12 mois × 6 flux) + poids journaliers (365 j) + créneaux 30 min (12 mois × flux × profils Lundi-samedi / Dimanche) |
-| `data/planning.json` | **Onglet Planification** : feuille Planning du classeur `Planning AUCHAN.xlsx` (10 jours, 80 agents) — personnes planifiées par jour et par créneau 30 min, hors FIM / pause repas / allaitement |
+| `data/planning.json` | **Onglet Planification** : feuille Planning du classeur `Planning AUCHAN.xlsx` (10 jours, 80 agents) — personnes planifiées par jour et par créneau 30 min, hors FIM et hors pause repas |
 | `data/data.json` | Autres onglets : capacitaire + réalisé (DRM oct. 2026) + DMT (Vonage, 1–25 oct.) + Mail (Export Mail, 1–25 oct.) |
 | `favicon.svg` | Icône de l'outil (onglet navigateur) |
 | `_headers` | Cloudflare : pas de cache (mises à jour toujours visibles) |
@@ -28,9 +28,12 @@ Déploiement : Cloudflare Workers (déploiement manuel ou Git integration).
 **Flux** (multi : Front office / Back office / Autres) · **Channel** (multi : PHONE / MAIL / CHAT) ·
 **Activités** (multi : Hyper, C2E, AFR, Drive, SAV, Direct, Chat, Borne/LSA) · **Période**
 (préréglages : Tout · mois récent · mois précédent · 7 j · 30 j · personnalisé) ·
-**Intervalle de période** (du / au). Structure : Front office = PHONE (Hyper, C2E, AFR, Drive, SAV, Direct) ·
+**Intervalle de période** (du / au). Chaque groupe de filtres a ses boutons **Tout / Aucun**
+(sélectionner ou désélectionner tout) et un code couleur propre (Flux bleu · Channel vert ·
+Activités violet). Structure : Front office = PHONE (Hyper, C2E, AFR, Drive, SAV, Direct) ·
 Back office = MAIL (Hyper, AFR, Drive) · Autres = CHAT. La sélection Flux restreint les Channels
-possibles, qui restreignent les Activités possibles (cascade). Les filtres sont mémorisés d'un onglet
+possibles, qui restreignent les Activités possibles (cascade) ; tout est sélectionné par défaut
+et une sélection vide affiche « aucune donnée ». Les filtres sont mémorisés d'un onglet
 à l'autre et d'une session à l'autre ; ils sont grisés quand ils ne s'appliquent pas
 (Roadmap = hebdo, Prévision = mensuel, Planification = agents).
 
@@ -70,29 +73,33 @@ possibles, qui restreignent les Activités possibles (cascade). Les filtres sont
    (répartition journalière pondérée par la prev ; repli sur le prévu du fichier capacitaire) ;
    contractuel + couverture ; bloc **« Hypothèses de productivité »** (actes/heure par activité,
    éditable, mémorisé).
-4. **Capa prévu vs Capa réel** — capacitaire (heures + actes) **vs Planning**
-   (import `date · activité · heures`) : heures planifiées → capa réelle, × productivités →
-   actes ; réalisés DRM en ligne ; tableau par période avec écarts.
-5. **Productivité** — **une section par canal retenu dans les filtres globaux** (Phone et/ou Mail,
+4. **Planification** — personnes planifiées par jour et par créneau 30 min (feuille Planning) :
+   - **règles** : lignes Statut = Planifié uniquement ; **FIM** (Compétences = FIM ou
+     Total FIM = HP) = personnes hors prod, comptées à part ; **pause repas** exclue des
+     créneaux (fenêtre exacte Début/Fin Pause Repas) ; HP du fichier = shift − pause repas ;
+     **Heures de log = HP − Total FIM** ;
+   - **KPIs** : agents planifiés, personnes planifiées / jour (dont FIM), HP, Heures de log,
+     pointe (moyenne période ou jour précis) ;
+   - **graphiques** : personnes par jour (prod + FIM + Heures de log), personnes par créneau
+     30 min (moyenne période ou jour précis au choix), heures par jour (log / FIM + HP) ;
+   - **tableaux** : détail par jour (planifiés, dont FIM, HP, pause repas, Heures de log, FIM)
+     et **matrice créneau × jour** (personnes planifiées en prod, moyenne / jour) ;
+   - import : carte « Planification — agents & créneaux » (feuille `Planning`) ;
+     les données 01/11 → 10/11/2026 du fichier reçu sont préchargées dans `data/planning.json`.
+5. **Analyse capa** — capacitaire (heures + actes) **vs réel** :
+   - **réel en heures** = heures de log planifiées (feuille Planning, hors FIM)
+     **× (1 − absentéisme du modèle RM)** ;
+   - **réel en actes** = heures réelles **× productivité du modèle RM** (repli : hypothèses
+     saisies dans l'onglet Capacitaire) ; répartition par activité affinée si le
+     « Planning heures » (date · activité · heures) est importé ;
+   - graphiques : capa en actes prévu vs réel vs réalisé (DRM), capa en heures prévu vs réel
+     (+ planifié brut) ; tableau par période avec écarts ;
+   - nécessite la Planification ; absentéisme & productivité lus par semaine du modèle RM.
+6. **Productivité** — **une section par canal retenu dans les filtres globaux** (Phone et/ou Mail,
    Chat tant que non raccordé) : par activité
    `QS · QP · QS < 60 s · QE (si QP > 115 % : × 92 %) · T/P · DMT · productivité · TO`
    + nombres (traités, reçus, prévision, heures) ; tableau jour × activité (15 colonnes) ;
    prévision Phone = Webhelp × poids journaliers (repli Roadmap hebdo ÷ 7), prévision Mail = import dédié.
-6. **Planification** — *personnes planifiées par jour et par créneau 30 min* à partir de la
-   feuille `Planning` du classeur `Planning AUCHAN.xlsx` (une ligne = agent × jour) :
-   - **règles** : lignes Statut = Planifié uniquement ; **FIM** (Compétences = FIM ou
-     Total FIM = HP) = personnes hors prod, comptées à part ; **pause repas** exclue des
-     créneaux (fenêtre exacte Début/Fin Pause Repas) ; **allaitement** déduit au prorata
-     du shift (facteur (HP − allaitement) / HP) ; HP du fichier = shift − pause repas ;
-     heures en prod = HP − Total FIM − Allaitement ;
-   - **KPIs** : agents planifiés, personnes planifiées / jour (dont FIM), HP, heures en prod,
-     pointe (moyenne période ou jour précis) ;
-   - **graphiques** : personnes par jour (prod + FIM + heures en prod), personnes par créneau
-     30 min (moyenne période ou jour précis au choix), heures par jour (prod / FIM / allaitement + HP) ;
-   - **tableaux** : détail par jour (planifiés, dont FIM, HP, pause repas, prod, FIM, allaitement)
-     et **matrice créneau × jour** (personnes planifiées en prod, moyenne / jour) ;
-   - import : carte « Planification — agents & créneaux » (feuille `Planning`) ;
-     les données 01/11 → 10/11/2026 du fichier reçu sont préchargées dans `data/planning.json`.
 
 > Les onglets **DMT** et **Mail** ont été retirés : les imports correspondants restent disponibles
 > et alimentent l'onglet Productivité (Phone = DRM + Export Vonage Call, Mail = Export Mail +

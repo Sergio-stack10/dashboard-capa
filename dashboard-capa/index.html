@@ -119,6 +119,20 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 .chipbtn{border:1px solid var(--line);background:#fff;color:var(--mut);border-radius:99px;padding:5px 13px;font-size:12.5px;font-weight:600;transition:.15s}
 .chipbtn:hover{border-color:var(--pri);color:var(--pri)}
 .chipbtn.on{background:var(--pri);border-color:var(--pri);color:#fff}
+/* groupes de filtres distingués par couleur : Flux bleu · Channel vert · Activités violet */
+.fbox{border:1px solid var(--line);border-radius:12px;padding:8px 12px 10px;background:#fbfcff}
+.fbox.fboxF{border-top:3px solid #3b5bdb}
+.fbox.fboxC{border-top:3px solid #0ca678}
+.fbox.fboxA{border-top:3px solid #7048e8}
+.fbox .fhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.fbox .fhead label{margin:0}
+.fbox .factions{display:flex;gap:4px}
+.fmini{border:1px solid var(--line);background:#fff;color:var(--mut);border-radius:7px;padding:2px 9px;font-size:10.5px;font-weight:700;letter-spacing:.3px}
+.fmini:hover{border-color:var(--pri);color:var(--pri)}
+#gfFlux .chipbtn.on{background:#3b5bdb;border-color:#3b5bdb}
+#gfChan .chipbtn.on{background:#0ca678;border-color:#0ca678}
+#gfActs .chipbtn.on{background:#7048e8;border-color:#7048e8}
+#gfFlux .chipbtn{border-color:#bac8f5}#gfChan .chipbtn{border-color:#b8dcc9}#gfActs .chipbtn{border-color:#d3c5f2}
 .grp.dis{opacity:.4;pointer-events:none}
 .gnote{flex-basis:100%;font-size:11.5px;color:var(--mut);margin-top:-4px}
 </style>
@@ -140,18 +154,24 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   <button data-p="p1" class="on">Roadmap</button>
   <button data-p="p4">Prévision</button>
   <button data-p="p2">Capacitaire</button>
-  <button data-p="p3">Capa prévu vs Capa réel</button>
-  <button data-p="p5">Productivité</button>
   <button data-p="p8">Planification</button>
+  <button data-p="p3">Analyse capa</button>
+  <button data-p="p5">Productivité</button>
 </nav>
 
 <!-- ================= FILTRES GLOBAUX (communs à tous les onglets) ================= -->
 <div class="gbar" id="gBar">
   <div class="grp" id="gfGW"><label>Granularité</label><select id="gG">
     <option value="jour">Jour</option><option value="semaine">Semaine</option><option value="mois">Mois</option></select></div>
-  <div class="grp" id="gfFW"><label>Flux</label><div class="chips" id="gfFlux"></div></div>
-  <div class="grp" id="gfCW"><label>Channel</label><div class="chips" id="gfChan"></div></div>
-  <div class="grp" id="gfAW"><label>Activités</label><div class="chips" id="gfActs"></div></div>
+  <div class="grp fbox fboxF" id="gfFW"><div class="fhead"><label>Flux</label>
+    <span class="factions"><button type="button" class="fmini" data-g="flux" data-on="1">Tout</button><button type="button" class="fmini" data-g="flux" data-on="0">Aucun</button></span></div>
+    <div class="chips" id="gfFlux"></div></div>
+  <div class="grp fbox fboxC" id="gfCW"><div class="fhead"><label>Channel</label>
+    <span class="factions"><button type="button" class="fmini" data-g="chan" data-on="1">Tout</button><button type="button" class="fmini" data-g="chan" data-on="0">Aucun</button></span></div>
+    <div class="chips" id="gfChan"></div></div>
+  <div class="grp fbox fboxA" id="gfAW"><div class="fhead"><label>Activités</label>
+    <span class="factions"><button type="button" class="fmini" data-g="acts" data-on="1">Tout</button><button type="button" class="fmini" data-g="acts" data-on="0">Aucun</button></span></div>
+    <div class="chips" id="gfActs"></div></div>
   <div class="grp" id="gfPW"><label>Période</label><select id="gP">
     <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
     <option value="d7">7 derniers jours</option><option value="d30">30 derniers jours</option><option value="custom">Personnalisé</option></select></div>
@@ -229,20 +249,20 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   <div class="card"><h3>Capacitaire vs Prévu / Contractuel</h3><div class="charthold tall"><canvas id="c2a"></canvas></div></div>
   <div class="card"><h3>Détail par période</h3><div class="tblwrap"><table id="t2"></table></div></div>
   <div class="card"><h3>Hypothèses de productivité — actes / heure</h3>
-    <p class="hint">Saisissez les actes traités par heure et par activité. Elles convertissent heures ↔ actes : capacitaire en heures (si absente du fichier CAPA), capa réelle issue du planning (onglet « Capa prévu vs Capa réel »), productivité et taux d'occupation.</p>
+    <p class="hint">Saisissez les actes traités par heure et par activité. Elles convertissent heures ↔ actes : capacitaire en heures (si absente du fichier CAPA), capa réel de l'onglet « Analyse capa » (repli si le modèle RM n'a pas la productivité), productivité et taux d'occupation.</p>
     <div class="prodgrid" id="prodEd"></div>
   </div>
 </section>
 
-<!-- ================= P3 : CAPA PRÉVU VS CAPA RÉEL ================= -->
+<!-- ================= P3 : ANALYSE CAPA (prévu vs réel) ================= -->
 <section id="p3" class="page">
   <div class="toolbar">
     <div class="src" id="w3Src"></div>
   </div>
   <div class="kpis" id="k3"></div>
   <div class="grid2">
-    <div class="card"><h3>Capacitaire en actes — prévue vs réelle (planning) vs réalisé</h3><div class="charthold"><canvas id="c3a"></canvas></div></div>
-    <div class="card"><h3>Capacitaire en heures — prévue vs planifiée</h3><div class="charthold"><canvas id="c3b"></canvas></div></div>
+    <div class="card"><h3>Capa en actes — prévu vs réel vs réalisé</h3><div class="charthold"><canvas id="c3a"></canvas></div></div>
+    <div class="card"><h3>Capa en heures — prévu vs réel (planifié hors FIM × (1 − absentéisme))</h3><div class="charthold"><canvas id="c3b"></canvas></div></div>
   </div>
   <div class="card"><h3>Détail par période</h3><div class="tblwrap"><table id="t3"></table></div></div>
   <div class="card"><p class="hint" id="p3Hint"></p></div>
@@ -273,15 +293,15 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
       <div class="card"><h3>1 · Personnes planifiées par jour — prod &amp; FIM hors prod</h3><div class="charthold"><canvas id="c8a"></canvas></div></div>
       <div class="card"><h3>2 · Personnes planifiées par créneau 30 min</h3><div class="charthold"><canvas id="c8b"></canvas></div></div>
     </div>
-    <div class="card"><h3>3 · Heures par jour — planifiées (HP) · en prod · FIM · allaitement</h3><div class="charthold tall"><canvas id="c8c"></canvas></div></div>
+    <div class="card"><h3>3 · Heures par jour — planifiées (HP) · Heures de log · FIM</h3><div class="charthold tall"><canvas id="c8c"></canvas></div></div>
     <div class="card"><h3>Détail par jour</h3><div class="tblwrap"><table id="t8"></table></div>
       <p class="hint" id="h8"></p></div>
     <div class="card"><h3>Matrice — personnes planifiées (prod) par créneau 30 min</h3><div class="tblwrap"><table id="t8m"></table></div></div>
   </div>
   <div class="card empty" id="p8empty" style="display:none">
     <b>Aucune planification.</b><br>Importez le classeur Planning (.xlsx, feuille <code>Planning</code> — Statut, Nice IEX, Shift In/Out,
-    Pause repas, HP, Allaitement, Total FIM) via le bouton <b>Importer</b> : personnes planifiées par jour et par créneau 30 min,
-    hors FIM (hors prod), hors pause repas et hors allaitement. Les données du fichier du 01/11 au 10/11/2026 sont préchargées.
+    Pause repas, HP, Total FIM) via le bouton <b>Importer</b> : personnes planifiées par jour et par créneau 30 min,
+    hors FIM (hors prod) et hors pause repas. Les données du fichier du 01/11 au 10/11/2026 sont préchargées.
   </div>
 </section>
 
@@ -307,7 +327,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
         <label>Choisir le fichier<input type="file" id="fCapa" accept=".xlsx,.xlsm,.xls"></label>
         <span class="st" id="stCapa"></span></div>
       <div class="imp"><b>Planning — heures planifiées</b>
-        <p>Synthèse quotidienne : colonnes <code>date · activité · heures</code> (l'activité peut être « Hyper », « Voix Hyper »…). Alimente la capa réelle de l'onglet « Capa prévu vs Capa réel » et le taux d'occupation.</p>
+        <p>Synthèse quotidienne : colonnes <code>date · activité · heures</code> (l'activité peut être « Hyper », « Voix Hyper »…). Alimente la répartition par activité du capa réel dans l'onglet « Analyse capa » et le taux d'occupation.</p>
         <label>Choisir le fichier<input type="file" id="fPlan" accept=".xlsx,.xls,.csv"></label>
         <span class="st" id="stPlan"></span></div>
       <div class="imp"><b>Réalisé — DRM</b>
@@ -327,8 +347,8 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
         <label>Choisir le fichier<input type="file" id="fPmail" accept=".xlsx,.xls,.csv"></label>
         <span class="st" id="stPmail"></span></div>
       <div class="imp"><b>Planification — agents &amp; créneaux (nouveau)</b>
-        <p>Classeur .xlsx, feuille <code>Planning</code> (une ligne = agent × jour : Statut, Nice IEX, Shift In/Out, Pause repas, HP, Allaitement, Total FIM).
-        Calcule les personnes planifiées par jour et par créneau 30 min — hors FIM (hors prod), hors pause repas et hors allaitement. Alimente l'onglet Planification.</p>
+        <p>Classeur .xlsx, feuille <code>Planning</code> (une ligne = agent × jour : Statut, Nice IEX, Shift In/Out, Pause repas, HP, Total FIM).
+        Calcule les personnes planifiées par jour et par créneau 30 min — hors FIM (hors prod) et hors pause repas. Alimente l'onglet Planification.</p>
         <label>Choisir le fichier<input type="file" id="fPlanA" accept=".xlsx,.xlsm,.xls"></label>
         <span class="st" id="stPlanA"></span></div>
       <div class="imp"><b>Prévision Webhelp — jour &amp; 30 min (nouveau)</b>

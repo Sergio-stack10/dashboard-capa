@@ -4,7 +4,7 @@
    Données : localStorage « capaData » sinon data/data.json (+ data/roadmap.json + data/prevision.json + data/planning.json)
    Onglets : p1 Roadmap (besoin & capacité — modèle RM S46+) · p4 Prévision (Webhelp — jour & 30 min) ·
              p2 Capacitaire (actes & heures, répartition journalière pondérée par la prévision) ·
-             p3 Capa prévu vs Capa réel (planning) · p5 Productivité (sections Phone/Mail/Chat) ·
+             p3 Analyse capa (prévu vs réel) · p5 Productivité (sections Phone/Mail/Chat) ·
              p8 Planification (feuille Planning — personnes par jour & créneaux 30 min)
    Filtres globaux (tous les onglets) : Granularité · Flux (FO/BO/Autres, multi) ·
    Channel (PHONE/MAIL/CHAT, multi) · Activités (multi) · Période · Intervalle de période.
@@ -29,14 +29,26 @@ const CH_ACTS  = { PHONE: ['Hyper', 'C2E', 'AFR', 'Drive', 'SAV', 'Direct'],
                    MAIL: ['Hyper', 'AFR', 'Drive'], CHAT: ['Chat', 'Borne/LSA'] };
 const ACT_CAP  = { hyper: 'Hyper', c2e: 'C2E', afr: 'AFR', drive: 'Drive', sav: 'SAV', direct: 'Direct' };
 const GF_LS = 'capaGF';
-let GF = { g: 'jour', flux: [], chan: [], acts: [], per: 'all', a: '', b: '' };
-function gfLoad() { try { const s = JSON.parse(localStorage.getItem(GF_LS)); if (s && typeof s === 'object') GF = Object.assign(GF, s); } catch (e) {} }
+const GF_V = 2;                                      /* v2 : sélection explicite (vide = rien d'affiché) */
+const gfAllActs = () => [...new Set(Object.values(CH_ACTS).flat())];
+let GF = { v: GF_V, g: 'jour', flux: Object.keys(FLUX_CH).slice(), chan: ['PHONE', 'MAIL', 'CHAT'],
+           acts: gfAllActs(), per: 'all', a: '', b: '' };
+function gfLoad() {
+  try {
+    const s = JSON.parse(localStorage.getItem(GF_LS));
+    if (s && typeof s === 'object') {
+      const old = !s.v || s.v < GF_V;                /* ancien format : sélection vide = tout */
+      GF = Object.assign(GF, s); GF.v = GF_V;
+      if (old) { GF.flux = Object.keys(FLUX_CH).slice(); GF.chan = ['PHONE', 'MAIL', 'CHAT']; GF.acts = gfAllActs(); }
+    }
+  } catch (e) {}
+}
 function gfSave() { try { localStorage.setItem(GF_LS, JSON.stringify(GF)); } catch (e) {} }
-function effFluxSet() { return new Set(GF.flux.length ? GF.flux : Object.keys(FLUX_CH)); }
+function effFluxSet() { return new Set(GF.flux); }
 function effChanSet() {
   const allow = new Set();
-  effFluxSet().forEach(f => (FLUX_CH[f] || []).forEach(c => allow.add(c)));
-  return new Set(GF.chan.length ? GF.chan.filter(c => allow.has(c)) : [...allow]);
+  GF.flux.forEach(f => (FLUX_CH[f] || []).forEach(c => allow.add(c)));
+  return new Set(GF.chan.filter(c => allow.has(c)));
 }
 function chanOfAct(a) { const s = norm(a);
   if (s.includes('mail')) return 'MAIL';
@@ -52,44 +64,55 @@ function gfPass(a, chanHint) {                       // une activité passe-t-el
   if (!a) return true;
   const ch = chanHint || chanOfAct(a);
   if (!effChanSet().has(ch)) return false;
-  if (GF.acts.length) return GF.acts.includes(actKeyOf(a));
-  return true;
+  return GF.acts.includes(actKeyOf(a));
 }
 function gfLbl() {                                   // libellé du périmètre choisi
+  const allF = GF.flux.length === Object.keys(FLUX_CH).length;
+  const allA = GF.acts.length >= gfAllActs().length;
+  if (allF && GF.chan.length >= 3 && allA) return 'Total';
   const bits = [];
-  GF.flux.forEach(f => bits.push(FLUX_LBL[f]));
-  if (GF.chan.length && !GF.flux.length) GF.chan.forEach(c => bits.push(c));
-  if (GF.acts.length) bits.push(GF.acts.join(' + '));
+  if (GF.flux.length && !allF) bits.push(GF.flux.map(f => FLUX_LBL[f]).join(' + '));
+  if (!GF.flux.length && GF.chan.length) bits.push(GF.chan.join(' + '));
+  if (GF.acts.length && !allA) bits.push(GF.acts.join(' + '));
   return bits.length ? bits.join(' · ') : 'Total';
 }
-function gfCascade() {
-  const chanAllow = new Set(); effFluxSet().forEach(f => (FLUX_CH[f] || []).forEach(c => chanAllow.add(c)));
+function gfCascade(auto) {
+  const chanAllow = new Set(); GF.flux.forEach(f => (FLUX_CH[f] || []).forEach(c => chanAllow.add(c)));
   GF.chan = GF.chan.filter(c => chanAllow.has(c));
-  const actAllow = new Set(); effChanSet().forEach(c => (CH_ACTS[c] || []).forEach(a => actAllow.add(a)));
+  const actAllow = new Set(); GF.chan.forEach(c => (CH_ACTS[c] || []).forEach(a => actAllow.add(a)));
   GF.acts = GF.acts.filter(a => actAllow.has(a));
+  if (auto) {                                        /* parent modifié : compléter les enfants si vide */
+    if (GF.flux.length && !GF.chan.length) GF.chan = [...chanAllow];
+    if (GF.chan.length && !GF.acts.length) GF.acts = [...new Set(GF.chan.flatMap(c => CH_ACTS[c] || []))];
+  }
 }
 function gfRender() {
   const fx = $('gfFlux'), cx = $('gfChan'), ax = $('gfActs');
   fx.innerHTML = Object.keys(FLUX_CH).map(f =>
     `<button type="button" class="chipbtn${GF.flux.includes(f) ? ' on' : ''}" data-f="${f}">${FLUX_LBL[f]}</button>`).join('');
-  const chanAllow = new Set(); effFluxSet().forEach(f => (FLUX_CH[f] || []).forEach(c => chanAllow.add(c)));
+  const chanAllow = new Set(); GF.flux.forEach(f => (FLUX_CH[f] || []).forEach(c => chanAllow.add(c)));
   cx.innerHTML = ['PHONE', 'MAIL', 'CHAT'].filter(c => chanAllow.has(c)).map(c =>
     `<button type="button" class="chipbtn${GF.chan.includes(c) ? ' on' : ''}" data-c="${c}">${c}</button>`).join('');
-  const actAllow = new Set(); effChanSet().forEach(c => (CH_ACTS[c] || []).forEach(a => actAllow.add(a)));
+  const actAllow = new Set(); GF.chan.forEach(c => (CH_ACTS[c] || []).forEach(a => actAllow.add(a)));
   ax.innerHTML = [...actAllow].map(a =>
     `<button type="button" class="chipbtn${GF.acts.includes(a) ? ' on' : ''}" data-a="${a}">${a}</button>`).join('');
   fx.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     const f = b.dataset.f;
     GF.flux = GF.flux.includes(f) ? GF.flux.filter(x => x !== f) : GF.flux.concat(f);
-    gfCascade(); gfSave(); gfRender(); if (RENDERS[PAGE]) RENDERS[PAGE](); }));
+    gfCascade(true); gfSave(); gfRender(); if (RENDERS[PAGE]) RENDERS[PAGE](); }));
   cx.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     const c = b.dataset.c;
     GF.chan = GF.chan.includes(c) ? GF.chan.filter(x => x !== c) : GF.chan.concat(c);
-    gfCascade(); gfSave(); gfRender(); if (RENDERS[PAGE]) RENDERS[PAGE](); }));
+    gfCascade(true); gfSave(); gfRender(); if (RENDERS[PAGE]) RENDERS[PAGE](); }));
   ax.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     const a = b.dataset.a;
     GF.acts = GF.acts.includes(a) ? GF.acts.filter(x => x !== a) : GF.acts.concat(a);
     gfSave(); gfRender(); if (RENDERS[PAGE]) RENDERS[PAGE](); }));
+}
+function gfSetGroup(gk, on) {                        /* Tout / Aucun sur un groupe */
+  if (gk === 'flux') GF.flux = on ? Object.keys(FLUX_CH).slice() : [];
+  else if (gk === 'chan') GF.chan = on ? [...new Set(GF.flux.flatMap(f => FLUX_CH[f] || []))] : [];
+  else GF.acts = on ? [...new Set(GF.chan.flatMap(c => CH_ACTS[c] || []))] : [];
 }
 function gfDisables() {                              // filtres sans objet sur certains onglets
   const off = { p1: ['gfGW'], p4: ['gfGW', 'gfPW', 'gfIW'], p8: ['gfFW', 'gfCW', 'gfAW'] }[PAGE] || [];
@@ -118,6 +141,10 @@ function bindGBar() {
   $('gP').addEventListener('change', () => { GF.per = $('gP').value; gfApplyPreset(); gfSave(); if (RENDERS[PAGE]) RENDERS[PAGE](); });
   $('gDa').addEventListener('change', () => { GF.a = $('gDa').value || ''; GF.per = 'custom'; $('gP').value = 'custom'; gfSave(); if (RENDERS[PAGE]) RENDERS[PAGE](); });
   $('gDb').addEventListener('change', () => { GF.b = $('gDb').value || ''; GF.per = 'custom'; $('gP').value = 'custom'; gfSave(); if (RENDERS[PAGE]) RENDERS[PAGE](); });
+  document.querySelectorAll('.fmini').forEach(b => b.addEventListener('click', () => {
+    gfSetGroup(b.dataset.g, b.dataset.on === '1');
+    gfCascade(b.dataset.on === '1'); gfSave(); gfRender(); if (RENDERS[PAGE]) RENDERS[PAGE]();
+  }));
   gfRender();
 }
 
@@ -1311,8 +1338,9 @@ function fillSelects() {
     ? 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') + ' · ' + R.weeks.length + ' sem.'
     : 'Modèle RM : à importer';
   $('w2Src').textContent = 'Capacitaire : ' + (D.capa.dates.length ? D.meta.capa : '—');
-  $('w3Src').textContent = 'Planning (h) : ' + (D.planH.dates.length ? D.planH.file : 'à importer') +
-    (D.capa.dates.length ? ' · Capacitaire : ' + (D.meta.capa || 'importée') : '');
+  $('w3Src').textContent = 'Planification : ' + (D.plan && D.plan.dates && D.plan.dates.length ? ((D.plan.meta && D.plan.meta.file) || 'importée') + ' (' + D.plan.dates.length + ' j)' : 'à importer') +
+    (D.capa.dates.length ? ' · Capacitaire : ' + (D.meta.capa || 'importée') : '') +
+    (D.rm2 ? ' · Modèle RM : ' + (D.meta.rm2 || (D.rm2.meta && D.rm2.meta.file) || 'RM') : '');
   $('w5Src').textContent = 'Phone : DRM + Vonage · Mail : Export Mail · Chat : —';
   fill4();
   $('w4Src').textContent = prevHas()
@@ -1691,54 +1719,95 @@ function r2() {
 }
 
 /* =====================================================================
-   P3 — CAPA PRÉVU VS CAPA RÉEL
+   P3 — ANALYSE CAPA (PRÉVU VS RÉEL)
    Capa prévue : fichier Capacitaire (actes, heures si présentes)
-   Capa réelle : Planning (heures planifiées) → actes via hypothèses de productivité
+   Capa réelle : Planification (feuille Planning) — heures de log (hors FIM) × (1 − absentéisme RM)
+                 → actes = heures réelles × productivité RM (repli : hypothèses saisies)
    Réalisé     : traités DRM (voix), fusion de l'ancien onglet « Planifié vs réalisé »
    ===================================================================== */
 function r3() {
-  const C = D.capa, P = D.planH, R = D.real;
-  if (!C.dates.length && !P.dates.length) {
-    $('k3').innerHTML = '<div class="kpi"><div class="lbl">Aucune capacitaire ni planning</div><div class="sub">Importez le fichier Capacitaire (DAILY VISION) et le Planning (date · activité · heures).</div></div>';
+  const C = D.capa, PH = D.planH, PL = D.plan, R = D.real, RM = D.rm2;
+  const hasPlanA = !!(PL && PL.dates && PL.dates.length);          // feuille Planning (agents × créneaux)
+  if (!C.dates.length && !hasPlanA && !PH.dates.length) {
+    $('k3').innerHTML = '<div class="kpi"><div class="lbl">Aucune capacitaire ni planification</div><div class="sub">Importez le fichier Capacitaire (DAILY VISION) et la Planification (feuille Planning).</div></div>';
     $('t3').innerHTML = ''; $('p3Hint').textContent = '';
     mkChart('c3a', { type: 'bar', data: { labels: [], datasets: [] } });
     mkChart('c3b', { type: 'bar', data: { labels: [], datasets: [] } }); return;
   }
   const g = GF.g;
-  const days = [...new Set([...C.dates, ...P.dates])].filter(d => inPer('p3', d)).sort();
+  const planDays = hasPlanA ? PL.dates : [];
+  const days = [...new Set([...C.dates, ...planDays, ...PH.dates])].filter(d => inPer('p3', d)).sort();
   if (!days.length) { noPer('p3', 'k3', ['c3a', 'c3b'], 't3'); $('p3Hint').textContent = ''; return; }
   const kOf = d => g === 'mois' ? mKey(d) : g === 'semaine' ? wLab(d) : d;
   const keys = [], idxOf = {};
   days.forEach(d => { const k = kOf(d); if (!(k in idxOf)) { idxOf[k] = keys.length; keys.push(k); } });
   const z = () => Array(keys.length).fill(0);
-  const pvA = z(), rlA = z(), pvH = z(), plH = z(), reD = z();
-  const missProd = new Set(), noHrs = new Set();
+  const pvA = z(), rlA = z(), pvH = z(), rlH = z(), hpB = z(), reD = z();
+  const noHrs = new Set(), noProd = new Set(), noAbs = new Set();
+  let usedAvg = false;
+  /* absentéisme & productivité du modèle RM (par semaine) */
+  const actsRM = RM ? rmActsSel() : [];
+  const absA = RM ? rmAggM('abs', actsRM) : null;
+  const wOf = d => {                                              // index de la semaine RM contenant d
+    if (!RM) return -1;
+    const ws = RM.weeks;
+    for (let i = 0; i < ws.length; i++) { const w = ws[i];
+      if (w.start && w.end && d >= w.start && d <= w.end) return i; }
+    return -1;
+  };
+  const absOf = d => { const i = wOf(d);
+    return i >= 0 && absA && absA[i] != null ? Math.min(.5, Math.max(0, absA[i])) : null; };
+  const prodRMof = (act, wi) => {                                 // actes/heure : modèle RM puis hypothèse saisie
+    const S = RM && RM.s.prod_h, x = S && S.a[act] ? S.a[act][wi] : null;
+    return x != null ? x : prodOf(act);
+  };
+  const avgProd = wi => {                                         // productivité moyenne (totaux RM pondérés pfin)
+    const S = RM && RM.s.prod_h;
+    if (S && actsRM.length) { let s = 0, w = 0;
+      actsRM.forEach(k => { const x = S.a[k] ? S.a[k][wi] : null;
+        const wt = ((RM.s.pfin && RM.s.pfin.a[k]) || [])[wi] || 0;
+        if (x != null && wt > 0) { s += x * wt; w += wt; } });
+      if (w > 0) return s / w; }
+    const cands = (actsRM.length ? actsRM : PH.acts).map(a => prodOf(a)).filter(v => v > 0);
+    return cands.length ? cands.reduce((x, y) => x + y, 0) / cands.length : null;
+  };
   /* capa prévue (actes + heures) — périmètre des filtres globaux */
   C.flux.forEach(f => {
     if (!gfPass(f.k)) return;
-    const hp = prodOf(f.a);
     C.dates.forEach((d, di) => {
       const k = idxOf[kOf(d)]; if (k == null) return;
       const ca = f.capa[di] || 0;
       pvA[k] += ca;
       const hc = hrsOf(f, di);
       if (hc.v != null) { pvH[k] += hc.v; if (hc.conv) noHrs.add(f.a); }
-      else if (ca) noHrs.add(f.a);
+      else {
+        const pr = prodRMof(f.a, wOf(d));
+        if (pr) { pvH[k] += ca / pr; noHrs.add(f.a); }      // productivité du modèle RM
+        else if (ca) noHrs.add(f.a);
+      }
     });
   });
-  /* capa réelle (planning) : heures planifiées → actes via hypothèses */
-  const hasPlan = P.dates.length > 0;
-  P.acts.forEach(a => {
-    if (!gfPass(a)) return;
-    const hp = prodOf(a);
-    if (!hp) missProd.add(a);
-    P.dates.forEach((d, di) => {
-      const h = (P.f[a] || [])[di] || 0; if (!h) return;
-      const k = idxOf[kOf(d)]; if (k == null) return;
-      plH[k] += h;
-      if (hp) rlA[k] += h * hp;
-    });
+  /* capa réelle — Planification : heures de log (hors FIM) × (1 − absentéisme RM) → actes × productivité RM */
+  planDays.forEach(d => {
+    const k = idxOf[kOf(d)]; if (k == null) return;
+    const D8 = PL.day[d]; if (!D8) return;
+    const hp = D8.hprod || 0; if (!hp) return;                    // heures planifiées hors FIM (feuille Planning)
+    const ab = absOf(d);
+    if (ab == null) noAbs.add(d);
+    const hlog = hp * (ab != null ? 1 - ab : 1);
+    rlH[k] += hlog; hpB[k] += hp;
+    const wi = wOf(d);
+    let split = null, tot = 0;                                    // répartition par activité via Planning heures
+    if (PH.dates.length) { const di = PH.dates.indexOf(d);
+      if (di >= 0) { split = PH.acts.map(a => ({ a, h: (PH.f[a] || [])[di] || 0 }))
+        .filter(x => gfPass(x.a) && x.h > 0);
+        tot = split.reduce((s, x) => s + x.h, 0); } }
+    if (split && tot > 0) split.forEach(x => { const pr = prodRMof(x.a, wi);
+      if (pr == null) noProd.add(x.a); else rlA[k] += hlog * (x.h / tot) * pr; });
+    else { const pr = avgProd(wi); usedAvg = true;
+      if (pr == null) noProd.add('productivité'); else rlA[k] += hlog * pr; }
   });
+  const hasPlan = planDays.length > 0;
   /* réalisé (DRM voix) */
   R.dates.forEach((d, di) => {
     const k = idxOf[kOf(d)]; if (k == null) return;
@@ -1749,53 +1818,59 @@ function r3() {
   });
   const rd = a => a.map(v => Math.round(v));
   const TP = pvA.reduce((a, b) => a + b, 0), TRl = rlA.reduce((a, b) => a + b, 0);
-  const TH = pvH.reduce((a, b) => a + b, 0), LH = plH.reduce((a, b) => a + b, 0), RD = reD.reduce((a, b) => a + b, 0);
+  const TH = pvH.reduce((a, b) => a + b, 0), RH = rlH.reduce((a, b) => a + b, 0), RD = reD.reduce((a, b) => a + b, 0);
   $('k3').innerHTML =
     kpi('Capa prévue (actes)', fmt(TP), g + ' · ' + gfLbl()) +
-    (hasPlan ? kpi('Capa réelle — planning (actes)', fmt(TRl), pctS(TRl, TP) + ' de la capa prévue' + (missProd.size ? ' · prod. manquante : ' + [...missProd].join(', ') : ''), TP ? Math.min(100, Math.abs(TRl - TP) / TP * 100) : 0)
-             : kpi('Planning non importé', '—', 'importez date · activité · heures')) +
-    kpi('Écart capa (réel − prévu)', hasPlan ? fmt(TRl - TP) : '—', hasPlan ? (TRl - TP >= 0 ? 'sur-capacité' : 'sous-capacité') : 'nécessite le planning', TP && hasPlan ? Math.min(100, Math.abs(TRl - TP) / TP * 100) : 0) +
-    kpi('Heures prévues / planifiées', fmt(TH) + ' / ' + (hasPlan ? fmt(LH) : '—'), hasPlan ? pctS(LH, TH) + ' des heures prévues' : 'heures prévues via hypothèses si besoin') +
+    (hasPlan ? kpi('Capa réel (actes)', fmt(TRl), 'heures de log × productivité' + (noProd.size ? ' · manquante : ' + [...noProd].join(', ') : ''), TP ? Math.min(100, Math.abs(TRl - TP) / TP * 100) : 0)
+             : kpi('Planification non importée', '—', 'feuille Planning requise pour le réel')) +
+    kpi('Écart capa (réel − prévu)', hasPlan ? fmt(TRl - TP) : '—', hasPlan ? (TRl - TP >= 0 ? 'sur-capacité' : 'sous-capacité') : 'nécessite la planification', TP && hasPlan ? Math.min(100, Math.abs(TRl - TP) / TP * 100) : 0) +
+    kpi('Heures — prévu / réel', fmt(TH) + ' / ' + (hasPlan ? fmt(RH) : '—'),
+        hasPlan ? pctS(RH, TH) + ' des heures prévues · planifié hors FIM ' + fmt(Math.round(hpB.reduce((a, b) => a + b, 0))) + ' h' +
+          (noAbs.size ? ' · absentéisme RM indisponible (' + noAbs.size + ' j)' : '') : 'réel = planifié hors FIM × (1 − absentéisme)') +
     kpi('Réalisé (DRM)', fmt(RD), hasPlan && TRl ? pctS(RD, TRl) + ' de la capa réelle' : 'traités de la période');
   mkChart('c3a', { type: 'bar', data: { labels: keys, datasets: [
-      { label: 'Capa prévue', data: rd(pvA), backgroundColor: '#3b5bdb', borderRadius: 3 },
-      ...(hasPlan ? [{ label: 'Capa réelle (planning)', data: rd(rlA), backgroundColor: '#f59f00', borderRadius: 3 }] : []),
+      { label: 'Capa prévue (actes)', data: rd(pvA), backgroundColor: '#3b5bdb', borderRadius: 3 },
+      ...(hasPlan ? [{ label: 'Capa réel (actes)', data: rd(rlA), backgroundColor: '#f59f00', borderRadius: 3 }] : []),
       { label: 'Réalisé (DRM)', data: rd(reD), type: 'line', borderColor: '#0ca678', borderWidth: 2, pointRadius: 1.5, tension: .3 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' } },
       scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisY('actes') } } });
   mkChart('c3b', { type: 'bar', data: { labels: keys, datasets: [
       { label: 'Heures prévues', data: pvH.map(v => Math.round(v * 10) / 10), backgroundColor: '#7048e8', borderRadius: 3 },
-      ...(hasPlan ? [{ label: 'Heures planifiées', data: plH.map(v => Math.round(v * 10) / 10), backgroundColor: '#1098ad', borderRadius: 3 }] : [])] },
+      ...(hasPlan ? [
+        { label: 'Heures réelles (log × (1 − abs))', data: rlH.map(v => Math.round(v * 10) / 10), backgroundColor: '#1098ad', borderRadius: 3 },
+        { label: 'Planifié hors FIM (brut)', data: hpB.map(v => Math.round(v * 10) / 10), type: 'line', borderColor: '#868e96', borderWidth: 2, pointRadius: 1.5, tension: .3, borderDash: [5, 3] }] : [])] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' } },
       scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisY('heures') } } });
-  let h = '<thead><tr><th>Période</th><th>Prévu (actes)</th><th>Réel planning (actes)</th><th>Écart actes</th><th>Prévu (h)</th><th>Planifié (h)</th><th>Écart h</th><th>Réalisé (DRM)</th><th>Réalisé / capa réelle</th></tr></thead><tbody>';
+  let h = '<thead><tr><th>Période</th><th>Prévu (actes)</th><th>Réel (actes)</th><th>Écart actes</th><th>Prévu (h)</th><th>Réel (h)</th><th>Planifié hors FIM (h)</th><th>Écart h</th><th>Réalisé (DRM)</th><th>Réalisé / réel</th></tr></thead><tbody>';
   keys.forEach((k, i) => {
-    const eA = rlA[i] - pvA[i], eH = plH[i] - pvH[i];
+    const eA = rlA[i] - pvA[i], eH = rlH[i] - pvH[i];
     h += `<tr><td>${k}</td><td>${fmt(pvA[i])}</td><td>${fmt(rlA[i])}</td>` +
          `<td class="${eA < 0 ? 'neg' : 'pos'}">${fmt(eA)}</td>` +
-         `<td>${fmt(pvH[i])}</td><td>${fmt(plH[i])}</td>` +
-         `<td class="${eH < 0 ? 'neg' : 'pos'}">${fmt(eH)}</td>` +
+         `<td>${fmt(pvH[i])}</td><td>${fmt(Math.round(rlH[i]))}</td><td>${fmt(Math.round(hpB[i]))}</td>` +
+         `<td class="${eH < 0 ? 'neg' : 'pos'}">${fmt(Math.round(eH))}</td>` +
          `<td>${fmt(reD[i])}</td><td>${pctS(reD[i], rlA[i])}</td></tr>`;
   });
   h += `</tbody><tfoot><tr><td>Total période</td><td>${fmt(TP)}</td><td>${fmt(TRl)}</td>` +
        `<td class="${TRl - TP < 0 ? 'neg' : 'pos'}">${fmt(TRl - TP)}</td>` +
-       `<td>${fmt(TH)}</td><td>${fmt(LH)}</td>` +
-       `<td class="${LH - TH < 0 ? 'neg' : 'pos'}">${fmt(LH - TH)}</td>` +
+       `<td>${fmt(TH)}</td><td>${fmt(Math.round(RH))}</td><td>${fmt(Math.round(hpB.reduce((a, b) => a + b, 0)))}</td>` +
+       `<td class="${RH - TH < 0 ? 'neg' : 'pos'}">${fmt(Math.round(RH - TH))}</td>` +
        `<td>${fmt(RD)}</td><td>${pctS(RD, TRl)}</td></tr></tfoot>`;
   $('t3').innerHTML = h;
   const notes = [];
-  if (!hasPlan) notes.push('Importez le Planning (date · activité · heures) pour afficher la capa réelle et les heures planifiées.');
-  if (missProd.size) notes.push('Hypothèses de productivité manquantes pour : ' + [...missProd].join(', ') + ' — définissez-les dans l\'onglet Capacitaire (actes réels non calculés pour ces activités).');
-  if (noHrs.size) notes.push('Heures prévues converties via les hypothèses de productivité (aucune ligne « Capacitaire en heures » dans le fichier CAPA).');
+  if (!hasPlan) notes.push('Importez la Planification (feuille Planning) pour afficher la capa réelle : heures de log (hors FIM) × (1 − absentéisme du modèle RM).');
+  if (noAbs.size && hasPlan) notes.push('Absentéisme du modèle RM indisponible pour ' + noAbs.size + ' jour(s) — déduction non appliquée sur ces jours.');
+  if (noProd.size && hasPlan) notes.push('Productivité manquante : ' + [...noProd].join(', ') + ' — renseignez le modèle RM (section Productivité) ou les hypothèses de l\'onglet Capacitaire.');
+  if (hasPlan && usedAvg && !noProd.size) notes.push('Actes réels = heures de log × productivité moyenne pondérée du modèle RM (activités retenues par les filtres) ; la répartition par activité est affinée si le « Planning heures » est importé.');
+  if (noHrs.size) notes.push('Heures prévues converties via la productivité (aucune ligne « Capacitaire en heures » dans le fichier CAPA).');
   $('p3Hint').textContent = notes.join(' ');
 }
 
 /* =====================================================================
    P8 — PLANIFICATION (feuille Planning : personnes par jour & créneaux 30 min)
    Personnes planifiées en prod = présence [Shift In, Shift Out) − pause repas,
-   hors FIM (hors prod), allaitement déduit au prorata — cf. impPlanning / planAgg.
+   hors FIM (hors prod) — cf. impPlanning / planAgg. Heures de log = HP − Total FIM.
    ===================================================================== */
 function planEmpty() { return !D.plan || !D.plan.dates || !D.plan.dates.length; }
 function defSlotDay8() {                            // jour par défaut : le plus chargé
@@ -1826,7 +1901,6 @@ function r8() {
   const totFimN = days.reduce((s, d) => s + P.day[d].fim, 0);
   const HP = days.reduce((s, d) => s + P.day[d].hp, 0);
   const HPD = days.reduce((s, d) => s + P.day[d].hprod, 0);
-  const AL = days.reduce((s, d) => s + P.day[d].alla, 0);
   const FM = days.reduce((s, d) => s + P.day[d].fimh, 0);
   const RP = days.reduce((s, d) => s + P.day[d].repas, 0);
   /* vue par créneau : moyenne période ou jour précis */
@@ -1838,7 +1912,7 @@ function r8() {
     kpi('Agents planifiés', fmt(ags.size), days.length + ' jour(s) sur la période') +
     kpi('Personnes planifiées / jour', fmt1(totPlan / days.length), 'dont FIM hors prod ' + fmt1(totFimN / days.length) + ' / j') +
     kpi('Heures planifiées (HP)', fmt(Math.round(HP)) + ' h', 'hors pause repas ' + fmt(Math.round(RP)) + ' h') +
-    kpi('Heures en prod', fmt(Math.round(HPD)) + ' h', 'hors FIM ' + fmt(Math.round(FM)) + ' h et allaitement ' + fmt1(AL) + ' h') +
+    kpi('Heures de log', fmt(Math.round(HPD)) + ' h', 'hors FIM ' + fmt(Math.round(FM)) + ' h') +
     kpi('Pointe ' + (jourPrecis ? dShort(d8) : 'moyenne période'), fmt1(vec[iP]), slots[iP] + ' · personnes en prod');
   /* graphique 1 : personnes par jour (granularité globale) */
   const { keys, idx } = aggBy(days, g);
@@ -1851,7 +1925,7 @@ function r8() {
   mkChart('c8a', { type: 'bar', data: { labels: keys, datasets: [
       { label: isAvg ? 'Planifiés prod (moy. / jour)' : 'Planifiés prod', data: avgArr(prodB).map(v => Math.round(v * 10) / 10), backgroundColor: '#3b5bdb', stack: 's', borderRadius: 2 },
       { label: isAvg ? 'FIM hors prod (moy. / jour)' : 'FIM hors prod', data: avgArr(fimB).map(v => Math.round(v * 10) / 10), backgroundColor: '#adb5bd', stack: 's', borderRadius: 2 },
-      { label: 'Heures en prod', data: hpdB.map(v => Math.round(v)), type: 'line', borderColor: '#f59f00', borderWidth: 2, pointRadius: 2, tension: .3, yAxisID: 'y2' }] },
+      { label: 'Heures de log', data: hpdB.map(v => Math.round(v)), type: 'line', borderColor: '#f59f00', borderWidth: 2, pointRadius: 2, tension: .3, yAxisID: 'y2' }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' } },
       scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
@@ -1866,26 +1940,25 @@ function r8() {
         tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y) } } },
       scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
                 y: { stacked: true, beginAtZero: true, ...axisY('personnes / créneau') } } } });
-  /* graphique 3 : heures par jour — prod / FIM / allaitement + HP */
+  /* graphique 3 : heures par jour — log / FIM + HP */
   mkChart('c8c', { type: 'bar', data: { labels: days.map(dShort), datasets: [
-      { label: 'Heures en prod', data: days.map(d => P.day[d].hprod), backgroundColor: '#0ca678', stack: 's', borderRadius: 2 },
+      { label: 'Heures de log', data: days.map(d => P.day[d].hprod), backgroundColor: '#0ca678', stack: 's', borderRadius: 2 },
       { label: 'FIM (hors prod)', data: days.map(d => P.day[d].fimh), backgroundColor: '#f59f00', stack: 's', borderRadius: 2 },
-      { label: 'Allaitement', data: days.map(d => P.day[d].alla), backgroundColor: '#d6336c', stack: 's', borderRadius: 2 },
       { label: 'HP (planifiées)', data: days.map(d => P.day[d].hp), type: 'line', borderColor: '#1b2440', borderWidth: 2, pointRadius: 1.5, tension: .3 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' } },
       scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
                 y: { stacked: true, beginAtZero: true, ...axisY('heures') } } } });
   /* tableau détail par jour */
-  let h = '<thead><tr><th>Date</th><th>Jour</th><th>Planifiés</th><th>dont FIM</th><th>HP (h)</th><th>Pause repas (h)</th><th>Prod (h)</th><th>FIM (h)</th><th>Allaitement (h)</th></tr></thead><tbody>';
+  let h = '<thead><tr><th>Date</th><th>Jour</th><th>Planifiés</th><th>dont FIM</th><th>HP (h)</th><th>Pause repas (h)</th><th>Heures de log (h)</th><th>FIM (h)</th></tr></thead><tbody>';
   days.forEach(d => { const D8 = P.day[d];
     h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td><td>${D8.plan}</td><td>${D8.fim}</td>` +
          `<td>${fmt1(D8.hp)}</td><td>${fmt1(D8.repas)}</td><td>${fmt1(D8.hprod)}</td>` +
-         `<td>${fmt1(D8.fimh)}</td><td>${fmt1(D8.alla)}</td></tr>`;
+         `<td>${fmt1(D8.fimh)}</td></tr>`;
   });
   h += `</tbody><tfoot><tr><td colspan="2">Total période · moy. / jour</td><td>${fmt1(totPlan / days.length)} / j</td>` +
        `<td>${fmt1(totFimN / days.length)} / j</td><td>${fmt(Math.round(HP))}</td><td>${fmt(Math.round(RP))}</td>` +
-       `<td>${fmt(Math.round(HPD))}</td><td>${fmt(Math.round(FM))}</td><td>${fmt1(AL)}</td></tr></tfoot>`;
+       `<td>${fmt(Math.round(HPD))}</td><td>${fmt(Math.round(FM))}</td></tr></tfoot>`;
   $('t8').innerHTML = h;
   /* matrice créneau × jour (personnes planifiées en prod) */
   let hm = '<thead><tr><th>Créneau</th>' + days.map(d => `<th>${dShort(d)}</th>`).join('') + '<th>Moy. / jour</th></tr></thead><tbody>';
@@ -1897,7 +1970,7 @@ function r8() {
   hm += '</tbody>';
   $('t8m').innerHTML = hm;
   $('h8').textContent = 'Personnes planifiées en prod = présence [Shift In, Shift Out) − pause repas · FIM (Compétences = FIM ou Total FIM = HP) compté hors prod · ' +
-    'allaitement déduit au prorata du shift · HP du fichier = shift − pause repas · heures en prod = HP − Total FIM − Allaitement.';
+    'HP du fichier = shift − pause repas · Heures de log = HP − Total FIM.';
   $('w8Src').textContent = 'Planification : ' + ((P.meta && P.meta.file) || 'importée') + ' · ' + days.length + ' j · ' +
     slots[0] + ' → ' + slots[slots.length - 1] + ' · ' + (jourPrecis ? 'jour ' + dShort(d8) : 'moyenne période');
 }
