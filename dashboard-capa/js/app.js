@@ -1,11 +1,14 @@
 'use strict';
 /* =====================================================================
    Dashboard capacitaire – Roadmap Auchan
-   Données : localStorage « capaData » sinon data/data.json (+ data/roadmap.json + data/prevision.json + data/planning.json)
-   Onglets : p1 Roadmap (besoin & capacité — modèle RM S46+) · p4 Prévision (Webhelp — jour & 30 min) ·
-             p2 Capacitaire (actes & heures, répartition journalière pondérée par la prévision) ·
-             p3 Analyse capa (prévu vs réel) · p5 Productivité (sections Phone/Mail/Chat) ·
-             p8 Planification (feuille Planning — personnes par jour & créneaux 30 min)
+   Données : localStorage « capaData » sinon data/data.json + data/roadmap.json
+             (modèle RM) + data/prevision.json (Prévision Webhelp) + data/dashcapa.json
+             (Données DASHBOARD CAPA AUCHAN : planification, skills, réalisation).
+   Onglets : p1 Roadmap (3 sous-onglets : annuelle par semaine · journalière · créneaux 30 min —
+             capa du modèle RM répartie selon les poids de la prévision) ·
+             p8 Planification (2 sous-onglets : journalière · créneaux — heures réparties
+             par activité × canal selon la feuille Skills) ·
+             p3 Analyse capa (capa roadmap vs planif) · p5 Analyse réalisé (sections Phone/Mail/Chat).
    Filtres globaux (tous les onglets) : Granularité · Flux (FO/BO/Autres, multi) ·
    Channel (PHONE/MAIL/CHAT, multi) · Activités (multi) · Période · Intervalle de période.
    Structure : Front office = PHONE (Hyper, C2E, AFR, Drive, SAV, Direct) · Back office = MAIL (Hyper, AFR, Drive) · Autres = CHAT.
@@ -16,7 +19,6 @@ const LS = 'capaData';
 const RFLOW = ['HYPER', 'C2E', 'AFR', 'DRIVE', 'SAV'];                       // flux du réalisé (DRM)
 const RCOL  = { HYPER:'#3b5bdb', C2E:'#0ca678', AFR:'#f59f00', DRIVE:'#7048e8', SAV:'#e8590c' };
 const PAL   = ['#3b5bdb','#0ca678','#f59f00','#7048e8','#e8590c','#1098ad','#d6336c','#74b816'];
-const FLOWS8 = ['Voix Hyper','Voix C2E','Voix AFR','Voix Drive','Voix SAV','Mail Hyper','Mail AFR','Mail Drive'];
 const MOIS  = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 const JJ    = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
 
@@ -115,7 +117,7 @@ function gfSetGroup(gk, on) {                        /* Tout / Aucun sur un grou
   else GF.acts = on ? [...new Set(GF.chan.flatMap(c => CH_ACTS[c] || []))] : [];
 }
 function gfDisables() {                              // filtres sans objet sur certains onglets
-  const off = { p1: ['gfGW'], p4: ['gfGW', 'gfPW', 'gfIW'], p8: ['gfFW', 'gfCW', 'gfAW'] }[PAGE] || [];
+  const off = { p1: ['gfGW', 'gfPW', 'gfIW'], p8: ['gfGW', 'gfPW', 'gfIW'] }[PAGE] || [];
   ['gfGW', 'gfFW', 'gfCW', 'gfAW', 'gfPW', 'gfIW'].forEach(id => $(id).classList.toggle('dis', off.includes(id)));
 }
 function syncGInputs() { $('gDa').value = GF.a || ''; $('gDb').value = GF.b || ''; }
@@ -194,6 +196,13 @@ function isoWeek(d) {                                // n° semaine ISO
   return 1 + Math.round(((t - f) / 86400000 - 3 + ((f.getUTCDay() + 6) % 7)) / 7);
 }
 const wLab = d => 'S' + isoWeek(d);
+function isoWeekYear(d) {                            // année ISO de la semaine (année du jeudi)
+  const dt = new Date(d + 'T00:00:00');
+  const t = new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+  const dn = (t.getUTCDay() + 6) % 7; t.setUTCDate(t.getUTCDate() - dn + 3);
+  return t.getUTCFullYear();
+}
+const wLabY = d => 'S' + isoWeek(d) + ' ' + String(isoWeekYear(d)).slice(2);   // 'S46 26' (S46 de 2025 ≠ S46 de 2026)
 const cum = a => { let s = 0; return a.map(v => (s += v)); };
 const addDays = (d, n) => { const t = new Date(d + 'T00:00:00'); t.setDate(t.getDate() + n); return t.toISOString().slice(0, 10); };
 const mondayOfW = w => addDays('2025-12-29', (w - 1) * 7);          // semaine 1 de 2026 : lun. 29 déc. 2025
@@ -202,15 +211,6 @@ const dShort = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? (+d.slice(8, 10)) + ' 
 const rangeLbl = (a, b) => !a && !b ? 'période complète'
   : a && b ? dShort(a) + ' → ' + dShort(b) + (a.slice(0, 4) !== b.slice(0, 4) ? ' ' + b.slice(0, 4) : '')
   : a ? 'depuis le ' + dShort(a) : 'jusqu\'au ' + dShort(b);
-
-/* normalisation d'un flux saisi (capa) vers les clés « Voix Hyper » … */
-function normFlux(v) {
-  const s = norm(v); if (!s) return '';
-  const ch = /mail/.test(s) ? 'Mail' : 'Voix';
-  for (const a of ['hyper', 'c2e', 'afr', 'drive', 'sav'])
-    if (s.includes(a)) return ch + ' ' + a.charAt(0).toUpperCase() + a.slice(1);
-  return String(v).trim();
-}
 
 /* normalisation d'une activité saisie (planning, ETP) : « Voix Hyper » / « Mail AFR » -> Hyper, AFR */
 function normAct(v) {
@@ -235,7 +235,7 @@ const CH = {};                                       // instances Chart.js
 
 function emptyData() {
   return { meta: { maj: new Date().toISOString().slice(0, 10) },
-           roadmap: [], capa: { dates: [], flux: [] },
+           roadmap: [],
            planH: { file: '', maj: '', dates: [], acts: [], f: {} },
            etp: { file: '', maj: '', rows: [] },
            prod: { file: '', def: {} },
@@ -244,6 +244,7 @@ function emptyData() {
            dmt: { file: '', maj: '', dates: [], flows: [], f: {} },
            mail: { file: '', maj: '', dates: [], flows: [], f: {} },
            pmail: { file: '', maj: '', rows: [] },
+           skills: null, logR: null,
            plan: null,
            prev: null };
 }
@@ -252,9 +253,6 @@ function ensure() {
   if (D.rm2 === undefined) D.rm2 = null;
   if (!D.roadmap) D.roadmap = [];
   D.roadmap.forEach(r => { if (!Array.isArray(r.etp)) r.etp = []; if (!Array.isArray(r.capa)) r.capa = []; });
-  if (!D.capa) D.capa = { dates: [], flux: [] };
-  D.capa.flux.forEach(f => { if (!Array.isArray(f.hrs)) f.hrs = [];
-    if (!Array.isArray(f.hrsPrev)) f.hrsPrev = []; if (!Array.isArray(f.hrsContr)) f.hrsContr = []; });
   if (!D.planH) D.planH = { file: '', maj: '', dates: [], acts: [], f: {} };
   if (!D.etp) D.etp = { file: '', maj: '', rows: [] };
   if (!D.prod) D.prod = { file: '', def: {} };
@@ -266,6 +264,8 @@ function ensure() {
   if (!D.pmail) D.pmail = { file: '', maj: '', rows: [] };
   if (D.plan === undefined) D.plan = null;
   if (D.prev === undefined) D.prev = null;
+  if (D.skills === undefined) D.skills = null;
+  if (D.logR === undefined) D.logR = null;
 }
 function save() { try { localStorage.setItem(LS, JSON.stringify(D)); } catch (e) { console.warn('localStorage', e); } }
 function sortReal() {
@@ -287,12 +287,6 @@ function sortMail() {
   M.flows.forEach(f => { const F = M.f[f]; if (!F) return;
     ['rec','tr','t60','del'].forEach(k => F[k] = o.map(x => (F[k] || [])[x[1]] ?? 0)); });
 }
-function sortPlanH() {
-  const P = D.planH, o = P.dates.map((d, i) => [d, i]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-  P.dates = o.map(x => x[0]);
-  P.acts.forEach(a => { P.f[a] = o.map(x => (P.f[a] || [])[x[1]] ?? 0); });
-}
-
 /* ---------- Chart.js : réglages communs ---------- */
 Chart.defaults.font.family = '"Segoe UI",system-ui,-apple-system,Arial,sans-serif';
 Chart.defaults.font.size = 11.5;
@@ -332,18 +326,13 @@ function renderHead() {
   if (D.rm2 && D.rm2.weeks && D.rm2.weeks.length)
     bits.push('Modèle RM : ' + (m.rm2 || (D.rm2.meta && D.rm2.meta.file) || 'RM') + ' (' + D.rm2.weeks.length + ' sem.)');
   else if (m.roadmap) bits.push('Roadmap : ' + m.roadmap);
-  if (m.capa) bits.push('Capacité : ' + m.capa);
   if (D.planH && D.planH.dates && D.planH.dates.length)
     bits.push('Planning (h) : ' + (m.plan || D.planH.file || 'importé') + ' (' + D.planH.dates.length + ' j)');
   if (D.plan && D.plan.dates && D.plan.dates.length)
-    bits.push('Planification : ' + ((D.plan.meta && D.plan.meta.file) || 'importée') + ' (' + D.plan.dates.length + ' j)');
-  if (D.etp && D.etp.file) bits.push('ETP : ' + D.etp.file);
-  if (D.real && D.real.dates && D.real.dates.length)
-    bits.push('Réalisé : ' + (m.real || D.real.file || 'DRM') + ' (' + D.real.dates.length + ' j)');
-  if (D.dmt && D.dmt.dates && D.dmt.dates.length)
-    bits.push('DMT : ' + (m.dmt || D.dmt.file || 'Vonage') + ' (' + D.dmt.dates.length + ' j)');
-  if (D.mail && D.mail.dates && D.mail.dates.length)
-    bits.push('Mail : ' + (m.mail || D.mail.file || 'Export Mail') + ' (' + D.mail.dates.length + ' j)');
+    bits.push('Planification : ' + ((D.plan.meta && D.plan.meta.file) || 'importée') + ' (' + D.plan.dates.length + ' j)' +
+      (D.skills && D.skills.by ? ' · ' + Object.keys(D.skills.by).filter(k => k.startsWith('wd:')).length + ' compétences' : ''));
+  if (D.logR && D.logR.dates && D.logR.dates.length)
+    bits.push('Heures de log réalisées : ' + D.logR.dates.length + ' j');
   if (D.prev && D.prev.mois && Object.keys(D.prev.mois).length)
     bits.push('Prévision Webhelp : ' + (m.prev || D.prev.meta && D.prev.meta.file || 'Webhelp') +
       (D.prev.meta && D.prev.meta.snapshot ? ' (au ' + dShort(D.prev.meta.snapshot) + ')' : ''));
@@ -540,337 +529,12 @@ function buildRoadmapCompat() {                                   // D.roadmap v
                  prev: grab('pfin', k), etp: grab('bes_etp', k), capa: grab('capa_a', k) }));
 }
 
-/* ---- Capacité : onglet DAILY VISION, dates ligne 15 (col 5), « Capacitaire en actes » ---- */
-function impCapa(name, buf) {
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames.find(n => norm(n).includes('daily')) || 0];
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-  const HR = 14;                                                   // ligne 15 (0-based)
-  const dates = [];
-  for (let c = 4; c < (aoa[HR] || []).length; c++) {
-    const d = isoD(aoa[HR][c]); if (d) dates.push(d); else dates.push('');
-  }
-  const n = dates.filter(Boolean).length;
-  if (!n) throw new Error('Dates introuvables ligne 15 (onglet DAILY VISION)');
-  /* blocs de flux : repérer les lignes « Capacitaire en actes » / « en heures », flux = en-tête de bloc au-dessus */
-  let cur = '';
-  const flux = [];
-  for (let r = 0; r < aoa.length; r++) {
-    const row = aoa[r] || [];
-    for (let c = 0; c < 4; c++) {
-      const v = row[c]; if (v != null && String(v).trim() !== '') cur = normFlux(v) || cur;
-    }
-    const lab = norm(row[3]);
-    const isActes = lab.includes('capacitaire en actes');
-    const isHeures = !isActes && lab.includes('capacitaire en heures');
-    if (isActes || isHeures) {
-      const key = FLOWS8.find(k => norm(k) === norm(cur)) || cur;
-      let fe = flux.find(f => f.k === key);
-      if (!fe) { fe = { k: key, c: key.startsWith('Mail') ? 'Mail' : 'Voix', a: key.split(' ')[1] || key }; flux.push(fe); }
-      const tgt = isActes ? ['prev', 'contr', 'capa'] : ['hrsPrev', 'hrsContr', 'hrs'];
-      fe[tgt[0]] = []; fe[tgt[1]] = []; fe[tgt[2]] = [];
-      for (let c = 4; c < dates.length + 4; c++) {                 // offsets -2/-1/0
-        fe[tgt[0]].push(n2(row[c - 2])); fe[tgt[1]].push(n2(row[c - 1])); fe[tgt[2]].push(n2(row[c]));
-      }
-    }
-  }
-  if (!flux.some(f => Array.isArray(f.capa))) throw new Error('Lignes « Capacitaire en actes » introuvables');
-  D.capa = { dates: dates.filter(Boolean), flux };
-  D.meta.capa = name;
-  const hasH = flux.some(f => (f.hrs || []).some(v => v > 0));
-  return flux.length + ' activités × ' + n + ' jours' + (hasH ? ' · capacitaire en heures extraite' : '');
-}
-
-/* ---- ETP prévus : colonnes semaine (S42 / 42 / date) · activité · etp ---- */
-function impEtp(name, buf) {
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-  let hi = aoa.findIndex(r => r && r.some(v => /etp/.test(norm(v))));
-  if (hi < 0) hi = 0;
-  const head = (aoa[hi] || []).map(v => norm(v));
-  const cA = head.findIndex(h => h === 'activite' || h === 'flux' || h.includes('activit') || h.includes('flux'));
-  const cE = head.findIndex(h => h.includes('etp'));
-  let cW = head.findIndex(h => h.includes('semaine'));
-  if (cW < 0) cW = head.findIndex(h => h.includes('date'));
-  if (cW < 0) cW = head.findIndex(h => h === 's');
-  if (cA < 0 || cE < 0 || cW < 0) throw new Error('Colonnes semaine (ou date) / activité / etp introuvables');
-  const rows = [];
-  for (let i = hi + 1; i < aoa.length; i++) {
-    const r = aoa[i] || [];
-    const a = String(r[cA] ?? '').trim(); const e = n2(r[cE]);
-    if (!a || e <= 0) continue;
-    let w = 0;
-    const raw = r[cW];
-    if (typeof raw === 'number' && raw >= 1 && raw <= 53) w = Math.round(raw);
-    else if (typeof raw === 'number') { const d = isoD(raw); w = d ? isoWeek(d) : 0; }
-    else {
-      const s = String(raw ?? '').trim();
-      const m = s.match(/^S?\s*(\d{1,2})$/i);
-      if (m && +m[1] >= 1 && +m[1] <= 53) w = +m[1];
-      else { const d = isoD(s); if (d) w = isoWeek(d); }
-    }
-    if (!w) continue;
-    rows.push([w, a, e]);
-  }
-  if (!rows.length) throw new Error('Aucun ETP lu (vérifiez semaine/date, activité, etp)');
-  D.etp = { file: name, maj: new Date().toISOString().slice(0, 10), rows };
-  D.meta.etp = name;
-  return rows.length + ' lignes ETP · ' + new Set(rows.map(r => norm(r[1]))).size + ' activités';
-}
-
-/* ---- Planning : synthèse quotidienne date · activité · heures ----
-   Heures planifiées par jour × activité → capa réelle en heures,
-   puis capa réelle en actes = heures × hypothèse de productivité. */
-function impPlanH(name, buf) {
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-  let hi = aoa.findIndex(r => r && r.some(v => norm(v) === 'date'));
-  if (hi < 0) hi = 0;
-  const head = (aoa[hi] || []).map(v => norm(v));
-  const cD = head.indexOf('date') >= 0 ? head.indexOf('date') : head.findIndex(h => h.includes('date'));
-  const cF = head.findIndex(h => h === 'activite' || h === 'flux' || h.includes('activit') || h.includes('flux'));
-  const cH = head.findIndex(h => h === 'heures' || h === 'heure' || h.includes('heure') || h.includes('planifie') || h === 'h');
-  if (cD < 0 || cF < 0 || cH < 0) throw new Error('Colonnes date / activité / heures introuvables');
-  const acc = new Map();                                           // 'date|ACT' -> heures
-  let n = 0;
-  for (let i = hi + 1; i < aoa.length; i++) {
-    const r = aoa[i] || []; const d = isoD(r[cD]);
-    const a = normAct(cF >= 0 ? r[cF] : ''); const h = n2(cH >= 0 ? r[cH] : 0);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !a || h <= 0) continue;
-    const k = d + '|' + a;
-    acc.set(k, (acc.get(k) || 0) + h);
-    n++;
-  }
-  if (!acc.size) throw new Error('Aucune ligne exploitable (date · activité · heures)');
-  const P = D.planH;
-  [...new Set([...acc.keys()].map(k => k.split('|')[1]))].forEach(a => {
-    if (!P.acts.includes(a)) { P.acts.push(a); P.f[a] = []; }
-  });
-  const ds = [...new Set([...acc.keys()].map(k => k.split('|')[0]))];
-  ds.forEach(d => { if (P.dates.indexOf(d) < 0) P.dates.push(d); });
-  sortPlanH();
-  acc.forEach((h, k) => { const [d, a] = k.split('|'); P.f[a][P.dates.indexOf(d)] = h; });   // même jour/activité = remplacé
-  P.file = name; P.maj = new Date().toISOString().slice(0, 10);
-  D.meta.plan = name;
-  return fmt(n) + ' lignes · ' + P.dates.length + ' jours · ' + P.acts.length + ' activités';
-}
-
-/* ---- Réalisé (DRM) : table journalière Traités / Reçus / Traités 60s × flux ---- */
-function impReal(name, buf) {
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  let aoa = null;
-  for (const sn of wb.SheetNames) {
-    const a = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: null });
-    const h1 = (a[0] || []).map(v => norm(v));
-    if (h1.includes('traites') && h1.includes('recus')) { aoa = a; break; }
-  }
-  if (!aoa) throw new Error('En-têtes « Traités / Reçus » introuvables (DRM attendu)');
-  const h1 = (aoa[0] || []).map(v => norm(v));
-  const h2 = ((aoa[1] || []).map(v => String(v ?? '').trim().toUpperCase()));
-  /* colonne DATE (ligne 2) + groupes : bornes = débuts consécutifs des libellés ligne 1 */
-  const dc = h2.findIndex(v => norm(v) === 'date');
-  if (dc < 0) throw new Error('Colonne DATE introuvable (ligne 2)');
-  const groups = [['traites', 't'], ['recus', 'r'], ['traites 60s', 's']];
-  const starts = [];
-  groups.forEach(([lab, k]) => { const i = h1.indexOf(lab); if (i >= 0) starts.push([i, k]); });
-  starts.sort((a, b) => a[0] - b[0]);
-  const colmap = {};                                               // flux -> {t:c,r:c,s:c}
-  starts.forEach(([st, k], gi) => {
-    const en = gi < starts.length - 1 ? starts[gi + 1][0] - 1 : h2.length - 1;
-    let got = false;                                               // plage STRICTEMENT contiguë
-    for (let c = st; c <= en; c++) {
-      const fl = h2[c];
-      if (RFLOW.includes(fl)) { colmap[fl] = colmap[fl] || {}; colmap[fl][k] = c; got = true; }
-      else if (got) break;                                         // 1er non-flux = fin du groupe
-    }
-  });
-  if (!Object.keys(colmap).length) throw new Error('Aucun flux reconnu sous les groupes (HYPER, C2E, AFR, DRIVE, SAV)');
-  const R = D.real;
-  let n = 0;
-  for (let i = 3; i < aoa.length; i++) {                           // données dès la ligne 4
-    const row = aoa[i] || [];
-    const raw = row[dc];
-    if (typeof raw === 'string' && raw.trim().toUpperCase() === 'DATE') break;   // 2e table (QS/QP)
-    if (typeof row[0] === 'string' && /mtd/i.test(row[0])) continue;             // lignes de totaux
-    const d = isoD(raw);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
-    let ix = R.dates.indexOf(d);
-    if (ix < 0) {                                                  // nouveau jour
-      ix = R.dates.length; R.dates.push(d); R.sem.push(0); R.jours.push('');
-      RFLOW.forEach(f => ['t','r','s'].forEach(k => R.f[f][k].push(0)));
-    }
-    R.sem[ix]   = Number(row[0]) || R.sem[ix] || 0;
-    R.jours[ix] = String(row[1] ?? '').trim() || R.jours[ix] || '';
-    for (const fl of RFLOW) {
-      const cm = colmap[fl] || {};
-      ['t','r','s'].forEach(k => {
-        const c = cm[k]; if (c == null) return;
-        const v = row[c];
-        R.f[fl][k][ix] = (v == null || v === '' || v === '*') ? 0 : (Number(v) || 0);
-      });
-    }
-    n++;
-  }
-  if (!n) throw new Error('Aucune ligne de données lue');
-  sortReal();
-  R.file = name; R.maj = new Date().toISOString().slice(0, 10);
-  D.meta.real = name;
-  return n + ' jours (' + R.dates[0] + ' → ' + R.dates[R.dates.length - 1] + ')';
-}
-
-/* ---- DMT : Export Vonage Call (1 ligne = 1 appel) ----
-   DMT = (durée de communication + after-call work) / appels répondus, par jour × compétence */
-function impDmt(name, buf) {
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-  let hi = aoa.findIndex(r => r && r.some(v => norm(v).includes('competence')) && r.some(v => norm(v).includes('date')));
-  if (hi < 0) hi = 0;
-  const head = (aoa[hi] || []).map(v => norm(v));
-  const col = subs => head.findIndex(h => h.includes(subs));
-  const cC = col('competence');
-  const cR = head.indexOf('repondu') >= 0 ? head.indexOf('repondu') : col('repondu');
-  const cD = col('date de creation') >= 0 ? col('date de creation') : col('date');
-  const cM = col('duree de communication'), cA = col('after call work');
-  const cL50 = head.findIndex(h => /sla\s*-?\s*50/.test(h));        // colonne SLA-50 optionnelle (perdus file)
-  if (cC < 0 || cD < 0) throw new Error('Colonnes « Compétence » / « Date de création » introuvables');
-  const agg = new Map();                                            // 'date|FLUX' -> [n répondus, sum com, sum acw, perdus -50s]
-  let nrep = 0;
-  for (let i = hi + 1; i < aoa.length; i++) {
-    const r = aoa[i] || [];
-    const d = isoD(r[cD]);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
-    const fl = String(r[cC] ?? '').trim().toUpperCase();
-    if (!fl) continue;
-    const rep = cR >= 0 ? n2(r[cR]) : 1;                            // sans colonne Répondu : tout compte
-    const com = n2(cM >= 0 ? r[cM] : 0), acw = n2(cA >= 0 ? r[cA] : 0);
-    const k = d + '|' + fl;
-    const a = agg.get(k) || [0, 0, 0, 0];
-    if (rep > 0) { a[0]++; nrep++; a[1] += com; a[2] += acw; }      // seuls les appels répondus entrent dans la DMT
-    if (cL50 >= 0) {                                                // perdus file -50s : toutes lignes (répondues ou non)
-      const v = r[cL50], nv = n2(v);
-      if (nv > 0) a[3] += nv;
-      else if (typeof v === 'string' && v.trim() !== '' && !/^(0|0,0|non|no|false|faux|n|-)$/.test(v.trim())) a[3]++;
-    }
-    agg.set(k, a);
-  }
-  if (!agg.size) throw new Error('Aucune ligne exploitable (vérifiez Compétence / Date de création)');
-  const M = D.dmt;
-  [...new Set([...agg.keys()].map(k => k.split('|')[1]))].forEach(f => {
-    if (!M.flows.includes(f)) { M.flows.push(f); M.f[f] = { n: [], com: [], acw: [], lost: [] }; }
-  });
-  const ds = [...new Set([...agg.keys()].map(k => k.split('|')[0]))];
-  ds.forEach(d => {
-    if (M.dates.indexOf(d) < 0) {
-      M.dates.push(d);
-      M.flows.forEach(f => { const F = M.f[f]; F.n.push(0); F.com.push(0); F.acw.push(0);
-        if (!F.lost) F.lost = []; F.lost.push(0); });
-    }
-  });
-  sortDmt();
-  let lostTot = 0;
-  agg.forEach(([n, com, acw, lost], k) => {
-    const [d, f] = k.split('|'), di = M.dates.indexOf(d);
-    M.f[f].n[di] = n; M.f[f].com[di] = com; M.f[f].acw[di] = acw;   // même jour/flux = remplacé (imports fusionnables)
-    if (!M.f[f].lost) M.f[f].lost = []; M.f[f].lost[di] = lost; lostTot += lost;
-  });
-  const rank = f => (RFLOW.indexOf(f) < 0 ? 9 : RFLOW.indexOf(f));
-  M.flows.sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1));
-  M.file = name; M.maj = new Date().toISOString().slice(0, 10);
-  D.meta.dmt = name;
-  return fmt(nrep) + ' appels répondus · ' + ds.length + ' jours · ' + M.flows.length + ' activités' +
-         (cL50 >= 0 ? ' · ' + fmt(lostTot) + ' perdus file -50s (SLA-50)' : '');
-}
-
-/* ---- Mail : Export Mail (1 ligne = 1 courriel) ----
-   Reçus = toutes les lignes · Traités = Statut 1 · QS<60s = traités avec délai < 60 s
-   DMT = Σ délais / traités (s) · Heures de traitement = Σ délais — par jour × activité */
-function impMail(name, buf) {
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-  let hi = aoa.findIndex(r => r && r.some(v => norm(v).startsWith('personnalis')));
-  if (hi < 0) hi = 0;
-  const head = (aoa[hi] || []).map(v => norm(v));
-  const cF = head.findIndex(h => h.startsWith('personnalis'));
-  const cS = head.indexOf('statut');
-  const cDel = head.findIndex(h => h.includes('delai de traitement'));
-  const cD = head.findIndex(h => h.includes('acceptation'));       // « Date d'acceptation » (ou sa copie)
-  if (cF < 0 || cD < 0) throw new Error("Colonnes « Personnalisé » / « Date d'acceptation » introuvables");
-  const agg = new Map();                                           // 'date|flux' -> [reçus, traités, <60s, Σ délais]
-  let tot = 0, skip = 0;
-  for (let i = hi + 1; i < aoa.length; i++) {
-    const r = aoa[i] || [];
-    if (!r || !r.some(v => v != null)) continue;
-    const d = isoD(r[cD]);
-    const fl = String(r[cF] ?? '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !fl) { skip++; continue; }
-    const a = agg.get(d + '|' + fl) || [0, 0, 0, 0];
-    a[0]++;                                                        // reçu
-    const st = n2(cS >= 0 ? r[cS] : 1);
-    const delai = n2(cDel >= 0 ? r[cDel] : 0);
-    if (Math.round(st) === 1) { a[1]++; a[3] += delai; if (delai > 0 && delai < 60) a[2]++; }
-    agg.set(d + '|' + fl, a);
-    tot++;
-  }
-  if (!agg.size) throw new Error("Aucune ligne exploitable (vérifiez Personnalisé / Date d'acceptation)");
-  const M = D.mail;
-  [...new Set([...agg.keys()].map(k => k.split('|')[1]))].forEach(f => {
-    if (!M.flows.includes(f)) { M.flows.push(f); M.f[f] = { rec: [], tr: [], t60: [], del: [] }; }
-  });
-  const ds = [...new Set([...agg.keys()].map(k => k.split('|')[0]))];
-  ds.forEach(d => {
-    if (M.dates.indexOf(d) < 0) {
-      M.dates.push(d);
-      M.flows.forEach(f => { const F = M.f[f]; F.rec.push(0); F.tr.push(0); F.t60.push(0); F.del.push(0); });
-    }
-  });
-  sortMail();
-  agg.forEach(([rec, tr, t60, del], k) => {
-    const [d, f] = k.split('|'), di = M.dates.indexOf(d);
-    M.f[f].rec[di] = rec; M.f[f].tr[di] = tr; M.f[f].t60[di] = t60; M.f[f].del[di] = del;   // même jour/flux = remplacé
-  });
-  const rank = f => { const i = RFLOW.indexOf(f.toUpperCase()); return i < 0 ? 9 : i; };
-  M.flows.sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1));
-  M.file = name; M.maj = new Date().toISOString().slice(0, 10);
-  D.meta.mail = name;
-  return fmt(tot) + ' courriels · ' + ds.length + ' jours · ' + M.flows.length + ' activités' +
-         (skip ? ' · ' + skip + ' ligne(s) ignorée(s) (activité/date vide)' : '');
-}
-
-/* ---- Prévision Mail : colonnes date · flux · prevu (ou prévision) ---- */
-function impPmail(name, buf) {
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-  let hi = aoa.findIndex(r => r && r.some(v => norm(v) === 'date'));
-  if (hi < 0) hi = 0;
-  const head = (aoa[hi] || []).map(v => norm(v));
-  const cD = head.indexOf('date') >= 0 ? head.indexOf('date') : head.findIndex(h => h.includes('date'));
-  const cF = head.findIndex(h => h === 'flux' || h === 'activite' || h.includes('flux') || h.includes('activit'));
-  const cP = head.findIndex(h => h === 'prevu' || h === 'prev' || h.includes('prevu') || h.includes('prevision'));
-  if (cD < 0 || cF < 0 || cP < 0) throw new Error('Colonnes date / flux / prevu introuvables');
-  const rows = [];
-  for (let i = hi + 1; i < aoa.length; i++) {
-    const r = aoa[i] || []; const d = isoD(r[cD]); const f = String(r[cF] ?? '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !f) continue;
-    const v = n2(r[cP]); if (!v) continue;
-    rows.push([d, f, v]);
-  }
-  if (!rows.length) throw new Error('Aucune prévision lue');
-  D.pmail = { file: name, maj: new Date().toISOString().slice(0, 10), rows };   // remplace la prévision
-  D.meta.pmail = name;
-  return rows.length + ' lignes de prévision · ' + new Set(rows.map(r => r[0])).size + ' jours';
-}
-
-/* ---- Planification : feuille « Planning » (une ligne = agent × jour) ----
+/* ---- Planification : feuille « Planning » du fichier « Données DASHBOARD CAPA AUCHAN » ----
    Lignes Statut = « Planifié » uniquement. Présence par créneau 30 min =
    recouvrement [Shift In, Shift Out) − recouvrement [Pause repas).
    FIM (Compétences = FIM ou Total FIM ≥ HP) = personnes hors prod : comptées à part, 0 en prod.
-   Allaitement déduit au prorata du shift : facteur (HP − allaitement) / HP.
-   HP du fichier = shift − pause repas ; heures en prod = HP − Total FIM − Allaitement. */
+   HP du fichier = shift − pause repas ; Heures de log = HP − Total FIM.
+   Répartition par activité × canal : cf. buildPlanExtras (feuille Skills). */
 function tMin(v) {                                   // valeur temps -> minutes (float) ou null
   if (v == null || v === '') return null;
   if (v instanceof Date && !isNaN(v)) return v.getHours() * 60 + v.getMinutes() + v.getSeconds() / 60;
@@ -900,71 +564,279 @@ function planAgg(rows) {                             // agrégation -> matrice d
   const m = { prod: {}, fim: {}, pres: {} }, day = {};
   dates.forEach(d => {
     const prod = slots.map(() => 0), fim = slots.map(() => 0), pres = slots.map(() => 0);
-    let hp = 0, alla = 0, fimh = 0, rep = 0, n = 0, nF = 0; const ags = [];
+    let hp = 0, fimh = 0, rep = 0, n = 0, nF = 0; const ags = [];
     by[d].forEach(r => {
       const hasRep = r.r1 != null && r.r2 != null && r.r2 > r.r1;
       const repM = hasRep ? ovMin(r.r1, r.r2, 0, 1440) : 0;
-      rep += repM / 60; hp += r.hp; alla += r.alla; fimh += r.fim; n++; ags.push(r.ag);
+      rep += repM / 60; hp += r.hp; fimh += r.fim; n++; ags.push(r.ag);
       if (r.fimrow) nF++;
-      const f = r.hp > 0 ? Math.max(0, (r.hp - r.alla) / r.hp) : 1;
       slots.forEach((s, i) => {
         const x = ovMin(s, s + 30, r.sin, r.sout) - (hasRep ? ovMin(s, s + 30, r.r1, r.r2) : 0);
         if (x <= 0) return;
         const w = x / 30;
         pres[i] += w;
-        if (r.fimrow) fim[i] += w; else prod[i] += w * f;
+        if (r.fimrow) fim[i] += w; else prod[i] += w;
       });
     });
     m.prod[d] = prod.map(v => Math.round(v * 1000) / 1000);
     m.fim[d]  = fim.map(v => Math.round(v * 1000) / 1000);
     m.pres[d] = pres.map(v => Math.round(v * 1000) / 1000);
-    day[d] = { plan: n, fim: nF, hp: r2d(hp), hprod: r2d(Math.max(0, hp - fimh - alla)),
-               alla: r2d(alla), fimh: r2d(fimh), repas: r2d(rep), ag: ags };
+    day[d] = { plan: n, fim: nF, hp: r2d(hp), hprod: r2d(Math.max(0, hp - fimh)),
+               fimh: r2d(fimh), repas: r2d(rep), ag: ags };
   });
   return { meta: { agents: new Set(pr.map(r => r.ag)).size }, dates,
            slots: slots.map(t => slotLab(Math.floor(t / 60) * 100 + t % 60)), m, day };
 }
-function impPlanning(name, buf) {
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const trySheet = n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null });
-  let aoa = null;
-  const sn = wb.SheetNames.find(n => norm(n) === 'planning') || wb.SheetNames.find(n => norm(n).includes('planning'));
-  if (sn) aoa = trySheet(sn);
-  else for (const n of wb.SheetNames) {
-    const a = trySheet(n); const h = (a[0] || []).map(v => norm(v));
-    if (h.includes('statut') && h.some(x => x.includes('shift'))) { aoa = a; break; }
+/* ---- Compétences (feuille Skills) & répartition des heures planifiées ----
+   HYPER/DRIVE -> 50/50 sur les activités Hyper et Drive × 50/50 sur les canaux MAIL/PHONE
+   ALL         -> toutes les activités et tous les canaux (répartition uniforme)
+   SAV         -> mono-compétence sur le PHONE · CHAT -> mono-compétence sur le CHAT
+   FIM         -> hors prod (exclu de la répartition). */
+const SK_LOT = { 'lot 1 & lot 2': 'HYPER/DRIVE', 'lot 3': 'SAV', 'lot 4': 'CHAT', 'lot unique': 'ALL' };
+function lotToSkill(lot) {
+  const s = norm(lot);
+  for (const k in SK_LOT) if (s.startsWith(k)) return SK_LOT[k];
+  return '';
+}
+function actSkillOf(acts) {
+  const s = norm(acts);
+  if (s.includes('all')) return 'ALL';
+  if (s.includes('hyper') || s.includes('drive')) return 'HYPER/DRIVE';
+  if (s.includes('sav')) return 'SAV';
+  if (s.includes('chat')) return 'CHAT';
+  return '';
+}
+function skillWeights(sk) {                          // [activité, canal, part]
+  if (sk === 'HYPER/DRIVE') return [['Hyper', 'PHONE', .25], ['Drive', 'PHONE', .25], ['Hyper', 'MAIL', .25], ['Drive', 'MAIL', .25]];
+  if (sk === 'SAV')  return [['SAV', 'PHONE', 1]];
+  if (sk === 'CHAT') return [['Chat', 'CHAT', 1]];
+  if (sk === 'ALL') {
+    const combos = [];
+    ['PHONE', 'MAIL', 'CHAT'].forEach(c => (CH_ACTS[c] || []).forEach(a => combos.push([a, c])));
+    const w = Math.round(1 / combos.length * 1e6) / 1e6;
+    return combos.map(([a, c]) => [a, c, w]);
   }
-  if (!aoa) throw new Error('Feuille « Planning » introuvable (Statut + Shift In/Out attendus)');
-  let hi = aoa.findIndex(r => r && r.some(v => norm(v) === 'statut') && r.some(v => norm(v).includes('shift')));
+  return [];
+}
+function skillOfRow(r) {                             // compétence d'une ligne Planning
+  const S = D.skills && D.skills.by;
+  if (S) {
+    if (r.wd && S['wd:' + r.wd]) return S['wd:' + r.wd].sk;
+    const mio = norm(r.ag).match(/web_pst42_\d+/);
+    if (mio && S['io:' + mio[0]]) return S['io:' + mio[0]].sk;
+  }
+  return lotToSkill(r.lot) || actSkillOf(r.lot) || 'ALL';
+}
+const slotMinCache = {};
+function slotMin(lab) {                              // '07:30' -> 450
+  if (slotMinCache[lab] != null) return slotMinCache[lab];
+  const m = String(lab).match(/^(\d{1,2}):(\d{2})$/);
+  return slotMinCache[lab] = m ? +m[1] * 60 + +m[2] : 0;
+}
+
+/* ---- Répartition des heures planifiées par activité × canal (skills) ----
+   Génère plan.byAct {date -> {'Act|CANAL' -> h}}, plan.byActSlot {date -> {'Act|CANAL' -> [h/créneau]}}
+   et D.planH (heures par activité, canaux fusionnés — f — et par act|canal — fc)
+   à partir des lignes planifiées hors FIM (plan.rows). */
+function buildPlanExtras() {
+  const P = D.plan; if (!P || !P.rows) return;
+  const combos = new Map();
+  const byAct = {}, byActSlot = {};
+  const slotMins = (P.slots || []).map(slotMin);
+  P.rows.forEach(r => {
+    if (r.fimrow) return;
+    const w = skillWeights(skillOfRow(r));
+    if (!w.length) return;
+    const d = r.d;
+    byAct[d] = byAct[d] || {}; byActSlot[d] = byActSlot[d] || {};
+    slotMins.forEach((s0, si) => {
+      let x = ovMin(s0, s0 + 30, r.sin, r.sout);
+      if (r.r1 != null && r.r2 != null && r.r2 > r.r1) x -= ovMin(s0, s0 + 30, r.r1, r.r2);
+      if (x <= 0) return;
+      const h = x / 60;                              // heures de présence du créneau
+      w.forEach(([a, c, share]) => {
+        const k = a + '|' + c; combos.set(k, { a, c });
+        byAct[d][k] = Math.round(((byAct[d][k] || 0) + h * share) * 1000) / 1000;
+        (byActSlot[d][k] = byActSlot[d][k] || Array(P.slots.length).fill(0))[si] += h * share;
+      });
+    });
+  });
+  P.acts = [...combos.keys()];
+  P.byAct = byAct; P.byActSlot = byActSlot;
+  const PH = D.planH = { file: (P.meta && P.meta.file) || '', maj: (P.meta && P.meta.maj) || '',
+    dates: (P.dates || []).slice(), acts: [], f: {}, fc: {} };
+  combos.forEach(({ a }) => { if (!PH.acts.includes(a)) PH.acts.push(a); });
+  PH.acts.sort();
+  PH.dates.forEach((d, di) => PH.acts.forEach(a => { PH.f[a] = PH.f[a] || []; PH.f[a][di] = 0; }));
+  P.dates.forEach((d, di) => {
+    Object.entries(byAct[d] || {}).forEach(([k, h]) => {
+      const a = k.split('|')[0];
+      PH.f[a][di] = Math.round(((PH.f[a][di] || 0) + h) * 1000) / 1000;
+      PH.fc[k] = PH.fc[k] || Array(PH.dates.length).fill(0);
+      PH.fc[k][di] = h;
+    });
+  });
+}
+
+/* ---- Import « Données DASHBOARD CAPA AUCHAN » (.xlsx) ----
+   Feuilles : Planning (heures planifiées agent × jour) · Skills (compétences) ·
+   EXT_Agent (heures de log réalisées) · EXT_Entrant (réalisé voix + DMT) · EXT_Email (réalisé mail).
+   Ce fichier devient la source unique de la planification et de la réalisation. */
+function impDashCapa(name, buf) {
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const sheetOf = test => wb.Sheets[wb.SheetNames.find(n => test(norm(n)))];
+  const aoa = sn => sn ? XLSX.utils.sheet_to_json(sn, { header: 1, raw: true, defval: null }) : null;
+  const bits = [];
+  /* 1 · Skills — agent -> compétence (clés wd:<workday> et io:<id odigo>) */
+  const snSk = sheetOf(n => n === 'skills');
+  if (snSk) {
+    const a = aoa(snSk), by = {};
+    for (let i = 1; i < a.length; i++) {
+      const r = a[i] || [];
+      const sk = actSkillOf(r[6]) || lotToSkill(r[0]);
+      if (!sk) continue;
+      const info = { sk, lot: String(r[0] ?? '') };
+      if (r[1] != null && String(r[1]).trim() !== '') by['wd:' + String(r[1]).trim()] = info;
+      if (r[5]) by['io:' + norm(r[5])] = info;
+    }
+    if (Object.keys(by).length)
+      D.skills = { meta: { file: name, maj: new Date().toISOString().slice(0, 10) }, by };
+  }
+  /* 2 · Planning — heures planifiées par agent × jour (Statut = Planifié) */
+  const snPl = sheetOf(n => n === 'planning');
+  if (!snPl) throw new Error('Feuille « Planning » introuvable');
+  const aP = aoa(snPl);
+  let hi = aP.findIndex(r => r && r.some(v => norm(v) === 'statut') && r.some(v => norm(v).includes('shift')));
   if (hi < 0) hi = 0;
-  const head = (aoa[hi] || []).map(v => norm(v));
+  const head = (aP[hi] || []).map(v => norm(v));
   const col = (nm, alts) => { let i = head.indexOf(nm);
     if (i >= 0) return i;
-    if (alts) for (const a of alts) { i = head.findIndex(h => h.includes(a)); if (i >= 0) return i; }
+    if (alts) for (const x of alts) { i = head.findIndex(h => h.includes(x)); if (i >= 0) return i; }
     return -1; };
   const cD = col('date'), cSt = col('statut'), cAg = col('log vonage', ['agent', 'noms']),
-    cCp = col('competences'), cSI = col('shift in', ['debut de shift']), cSO = col('shift out', ['fin de shift']),
-    cR1 = col('debut pause repas'), cR2 = col('fin pause repas'), cHP = col('hp'),
-    cAl = col('allaitement'), cFm = col('total fim');
+    cCp = col('competences'), cWd = col('workday'), cSI = col('shift in', ['debut de shift']),
+    cSO = col('fin de shift', ['shift out']), cR1 = col('debut pause repas'), cR2 = col('fin pause repas'),
+    cHP = col('hp'), cFm = col('total fim');
   if (cD < 0 || cSt < 0 || cSI < 0 || cSO < 0) throw new Error('Colonnes Statut / date / Shift In / Shift Out introuvables');
-  const rows = [];
-  for (let i = hi + 1; i < aoa.length; i++) {
-    const r = aoa[i] || [];
+  const rows = [], prodRows = [], fimAgs = new Set();
+  for (let i = hi + 1; i < aP.length; i++) {
+    const r = aP[i] || [];
     const d = isoD(r[cD]);
     const sin = tMin(cSI >= 0 ? r[cSI] : null), sout = tMin(cSO >= 0 ? r[cSO] : null);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || sin == null || sout == null || norm(r[cSt]) !== 'planifie') continue;
-    if (sout <= sin) sout += 1440;                                // shift à cheval sur minuit
-    const hp = tHrs(cHP >= 0 ? r[cHP] : 0), alla = tHrs(cAl >= 0 ? r[cAl] : 0), fim = tHrs(cFm >= 0 ? r[cFm] : 0);
+    if (sout <= sin) sout += 1440;
+    const hp = tHrs(cHP >= 0 ? r[cHP] : 0), fim = tHrs(cFm >= 0 ? r[cFm] : 0);
     const comp = norm(cCp >= 0 ? r[cCp] : '');
-    rows.push({ ok: true, d, ag: String(cAg >= 0 ? (r[cAg] ?? '') : ''),
+    const row = { ok: true, d, ag: String(cAg >= 0 ? (r[cAg] ?? '') : ''),
+      wd: cWd >= 0 ? String(r[cWd] ?? '').trim() : '', lot: comp,
       fimrow: comp === 'fim' || (fim > 0 && hp > 0 && fim >= hp - 0.01),
-      sin, sout, r1: tMin(cR1 >= 0 ? r[cR1] : null), r2: tMin(cR2 >= 0 ? r[cR2] : null), hp, alla, fim });
+      sin, sout, r1: tMin(cR1 >= 0 ? r[cR1] : null), r2: tMin(cR2 >= 0 ? r[cR2] : null), hp: r2d(hp), fim: r2d(fim) };
+    rows.push(row);
+    if (row.fimrow) fimAgs.add(row.ag); else prodRows.push(row);
   }
   const plan = planAgg(rows);
   plan.meta = Object.assign(plan.meta || {}, { file: name, maj: new Date().toISOString().slice(0, 10) });
+  plan.rows = prodRows;
   D.plan = plan;
   D.meta.planA = name;
-  return plan.dates.length + ' jours · ' + plan.slots.length + ' créneaux 30 min · ' + plan.meta.agents + ' agents planifiés';
+  buildPlanExtras();
+  bits.push(plan.dates.length + ' jours · ' + plan.meta.agents + ' agents planifiés · ' +
+    (D.planH.acts || []).length + ' activités réparties');
+  /* 3 · EXT_Agent — heures de log réalisées (Busy / Wrap Up / Hold / Chat / Panier), hors agents FIM */
+  const snAg = sheetOf(n => n.includes('ext_agent'));
+  if (snAg) {
+    const a = aoa(snAg);
+    const PROD = s => s.startsWith('busy') || ['wrap up', 'hold', 'chat', 'panier', 'transfer in', 'fintecture', 'courrier'].includes(s);
+    const acc = { PHONE: {}, CHAT: {} };
+    for (let i = 1; i < a.length; i++) {
+      const r = a[i] || []; if (r.length < 7) continue;
+      const d = isoD(r[1]); const act = norm(r[6]);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !PROD(act)) continue;
+      if (fimAgs.has(String(r[2] ?? ''))) continue;
+      const chan = norm(r[9]).toUpperCase() === 'CHAT' ? 'CHAT' : 'PHONE';
+      const h = tHrs(r[5]);
+      if (!(h > 0)) continue;
+      acc[chan][d] = (acc[chan][d] || 0) + h;
+    }
+    const dates = [...new Set(Object.keys(acc.PHONE).concat(Object.keys(acc.CHAT)))].sort();
+    if (dates.length) {
+      D.logR = { meta: { file: name, maj: new Date().toISOString().slice(0, 10) }, dates,
+        h: { PHONE: dates.map(d => r2d(acc.PHONE[d] || 0)), CHAT: dates.map(d => r2d(acc.CHAT[d] || 0)) } };
+      D.logR.h.tot = D.logR.h.PHONE.map((v, i) => r2d(v + D.logR.h.CHAT[i]));
+      bits.push('heures de log réalisées ' + fmt(Math.round(D.logR.h.tot.reduce((x, y) => x + y, 0))) + ' h');
+    }
+  }
+  /* 4 · EXT_Entrant — réalisé voix (Reçus / Traité / Traité -60 s) + DMT (communication + after-call) */
+  const snEn = sheetOf(n => n.includes('ext_entrant'));
+  if (snEn) {
+    const a = aoa(snEn);
+    const fluxOf = q => { const s = norm(q).toUpperCase();
+      const m = s.match(/^V\s+([A-Z0-9]+)/); let tok = m ? m[1] : s.replace(/-\d+$/, '').trim();
+      if (tok.startsWith('BARCELONE')) tok = 'BCN';
+      return tok || 'AUTRE'; };
+    const F = {}, ds = new Set();
+    for (let i = 1; i < a.length; i++) {
+      const r = a[i] || []; if (r.length < 27) continue;
+      const q = r[1] || r[2]; if (!q) continue;
+      const d = isoD(r[14]);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      const fl = fluxOf(q); ds.add(d);
+      const o = F[fl] = F[fl] || { r: {}, t: {}, s: {}, n: {}, com: {}, acw: {} };
+      const rep = norm(r[4]) === 'vrai';
+      o.r[d] = (o.r[d] || 0) + (n2(r[26]) || (rep ? 1 : 0));
+      o.t[d] = (o.t[d] || 0) + n2(r[25]);
+      o.s[d] = (o.s[d] || 0) + n2(r[5]);
+      if (rep) { o.n[d] = (o.n[d] || 0) + 1; o.com[d] = (o.com[d] || 0) + n2(r[13]); o.acw[d] = (o.acw[d] || 0) + n2(r[9]); }
+    }
+    const dates = [...ds].sort();
+    const rank = f => (RFLOW.indexOf(f) < 0 ? 9 : RFLOW.indexOf(f));
+    const flows = Object.keys(F).sort((x, y) => rank(x) - rank(y) || (x < y ? -1 : 1));
+    if (dates.length && flows.length) {
+      D.real = { meta: { file: name, maj: new Date().toISOString().slice(0, 10) }, dates, flows,
+        sem: dates.map(d => isoWeek(d)), jours: dates.map(jJours),
+        f: Object.fromEntries(flows.map(f => [f, { r: dates.map(d => F[f].r[d] || 0),
+          t: dates.map(d => F[f].t[d] || 0), s: dates.map(d => F[f].s[d] || 0) }])) };
+      D.dmt = { meta: { file: name, maj: new Date().toISOString().slice(0, 10) }, dates, flows,
+        f: Object.fromEntries(flows.map(f => [f, { n: dates.map(d => F[f].n[d] || 0),
+          com: dates.map(d => r2d(F[f].com[d] || 0)), acw: dates.map(d => r2d(F[f].acw[d] || 0)),
+          lost: dates.map(() => 0) }])) };
+      D.meta.real = D.meta.dmt = name;
+      bits.push('réalisé voix : ' + flows.length + ' flux');
+    }
+  }
+  /* 5 · EXT_Email — réalisé mail (reçus / traités / QS < 60 s / délais) */
+  const snMl = sheetOf(n => n.includes('ext_email'));
+  if (snMl) {
+    const a = aoa(snMl);
+    const F = {}, ds = new Set();
+    for (let i = 1; i < a.length; i++) {
+      const r = a[i] || []; if (r.length < 7) continue;
+      const fl = r[4]; if (!fl) continue;
+      const d = isoD(r[6]) || isoD(r[7]);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      const o = F[String(fl)] = F[String(fl)] || { rec: {}, tr: {}, t60: {}, del: {} };
+      ds.add(d);
+      o.rec[d] = (o.rec[d] || 0) + 1;
+      const st = norm(r[1]), de = n2(r[2]);
+      if (st.startsWith('ferm') || Math.round(n2(st)) === 1) {
+        o.tr[d] = (o.tr[d] || 0) + 1; o.del[d] = (o.del[d] || 0) + de;
+        if (de > 0 && de < 60) o.t60[d] = (o.t60[d] || 0) + 1;
+      }
+    }
+    const dates = [...ds].sort();
+    const rank = f => { const i = RFLOW.indexOf(f.toUpperCase()); return i < 0 ? 9 : i; };
+    const flows = Object.keys(F).sort((x, y) => rank(x) - rank(y) || (x < y ? -1 : 1));
+    if (dates.length && flows.length) {
+      D.mail = { meta: { file: name, maj: new Date().toISOString().slice(0, 10) }, dates, flows,
+        f: Object.fromEntries(flows.map(f => [f, { rec: dates.map(d => F[f].rec[d] || 0),
+          tr: dates.map(d => F[f].tr[d] || 0), t60: dates.map(d => F[f].t60[d] || 0),
+          del: dates.map(d => F[f].del[d] || 0) }])) };
+      D.meta.mail = name;
+      bits.push('réalisé mail : ' + flows.length + ' files');
+    }
+  }
+  if (bits.length <= 1) bits.push('réalisation : feuilles EXT_* absentes ou vides');
+  return bits.join(' · ');
 }
 
 /* ---- Prévision Webhelp : onglet « 2026 » (prévus mensuels par flux) + onglet « Poids » ----
@@ -1087,58 +959,19 @@ function impPrev(name, buf) {
     (snap ? ' · prévision au ' + dShort(snap) : '');
 }
 
-/* ---- modèle planning (.xlsx) ---- */
-function dlModele() {
-  const aoa = [['date','activite','heures'],
-               [isoD(new Date()), 'Hyper', 42],
-               [isoD(new Date()), 'AFR', 18],
-               [isoD(new Date()), 'Drive', 16]];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'PLANNING');
-  XLSX.writeFile(wb, 'modele-planning.xlsx');
-}
-
 /* ---- gestion des fichiers ---- */
 function bindImports() {
   $('fRoad').addEventListener('change', e => readFile(e.target, (f, b) => {
     try { setStatus('stRoad', impRoadmap(f.name, b), true); afterImport('p1'); }
     catch (err) { setStatus('stRoad', 'Erreur : ' + err.message, false); }
   }));
-  $('fCapa').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stCapa', impCapa(f.name, b), true); afterImport('p2'); }
-    catch (err) { setStatus('stCapa', 'Erreur : ' + err.message, false); }
-  }));
-  $('fEtp').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stEtp', impEtp(f.name, b), true); afterImport('p1'); }
-    catch (err) { setStatus('stEtp', 'Erreur : ' + err.message, false); }
-  }));
-  $('fPlan').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stPlan', impPlanH(f.name, b), true); afterImport('p3'); }
-    catch (err) { setStatus('stPlan', 'Erreur : ' + err.message, false); }
-  }));
-  $('fReal').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stReal', impReal(f.name, b), true); afterImport('p5'); }
-    catch (err) { setStatus('stReal', 'Erreur : ' + err.message, false); }
-  }));
-  $('fDmt').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stDmt', impDmt(f.name, b), true); afterImport('p5'); }
-    catch (err) { setStatus('stDmt', 'Erreur : ' + err.message, false); }
-  }));
-  $('fMail').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stMail', impMail(f.name, b), true); afterImport('p5'); }
-    catch (err) { setStatus('stMail', 'Erreur : ' + err.message, false); }
-  }));
-  $('fPmail').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stPmail', impPmail(f.name, b), true); afterImport('p5'); }
-    catch (err) { setStatus('stPmail', 'Erreur : ' + err.message, false); }
-  }));
-  $('fPlanA').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stPlanA', impPlanning(f.name, b), true); afterImport('p8'); }
-    catch (err) { setStatus('stPlanA', 'Erreur : ' + err.message, false); }
-  }));
   $('fPrev').addEventListener('change', e => readFile(e.target, (f, b) => {
-    try { setStatus('stPrev', impPrev(f.name, b), true); afterImport('p4'); }
+    try { setStatus('stPrev', impPrev(f.name, b), true); afterImport('p1'); }
     catch (err) { setStatus('stPrev', 'Erreur : ' + err.message, false); }
+  }));
+  $('fDash').addEventListener('change', e => readFile(e.target, (f, b) => {
+    try { setStatus('stDash', impDashCapa(f.name, b), true); afterImport('p8'); }
+    catch (err) { setStatus('stDash', 'Erreur : ' + err.message, false); }
   }));
 }
 function afterImport(page) {
@@ -1147,7 +980,76 @@ function afterImport(page) {
   go(page);
 }
 
-/* ---------- export / démo / reset ---------- */
+/* =====================================================================
+   AMORÇAGE
+   ===================================================================== */
+async function boot() {
+  try { const ls = localStorage.getItem(LS); if (ls) D = JSON.parse(ls); } catch (e) { /* ignoré */ }
+  if (!D) {
+    try { D = await (await fetch('data/data.json', { cache: 'no-store' })).json(); }
+    catch (e) { D = emptyData(); }
+  }
+  ensure();
+  if (!D.rm2) {                                                     // modèle RM : 1 fichier dédié
+    try {
+      D.rm2 = await (await fetch('data/roadmap.json', { cache: 'no-store' })).json();
+      if (D.rm2 && D.rm2.meta && D.rm2.meta.file) D.meta.rm2 = D.rm2.meta.file;
+    } catch (e) { D.rm2 = null; }
+  }
+  if (!D.prev) {                                                    // prévision Webhelp : 1 fichier dédié
+    try {
+      D.prev = await (await fetch('data/prevision.json', { cache: 'no-store' })).json();
+      if (D.prev && D.prev.meta && D.prev.meta.file) D.meta.prev = D.prev.meta.file;
+    } catch (e) { D.prev = null; }
+  }
+  if (!D.plan || !D.plan.rows || !D.skills) {                       // Données DASHBOARD CAPA (plan + skills + réalisation)
+    try {
+      const J = await (await fetch('data/dashcapa.json', { cache: 'no-store' })).json();
+      if (!D.plan || !D.plan.rows) {
+        D.plan = J.plan || null;
+        if (D.plan && D.plan.meta && D.plan.meta.file) D.meta.planA = D.plan.meta.file;
+      }
+      if (!D.skills && J.skills) D.skills = J.skills;
+      if ((!D.logR || !D.logR.dates || !D.logR.dates.length) && J.logR) D.logR = J.logR;
+      if (D.real && (!D.real.dates || !D.real.dates.length) && J.real) {
+        D.real = J.real; if (J.real.meta && J.real.meta.file) D.meta.real = J.real.meta.file;
+      }
+      if (D.dmt && (!D.dmt.dates || !D.dmt.dates.length) && J.dmt) {
+        D.dmt = J.dmt; if (J.dmt.meta && J.dmt.meta.file) D.meta.dmt = J.dmt.meta.file;
+      }
+      if (D.mail && (!D.mail.dates || !D.mail.dates.length) && J.mail) {
+        D.mail = J.mail; if (J.mail.meta && J.mail.meta.file) D.meta.mail = J.mail.meta.file;
+      }
+    } catch (e) { /* fichier absent : données à importer */ }
+  }
+  if (D.plan && D.plan.rows && !D.plan.byAct) buildPlanExtras();    // répartition skills des données préchargées
+  buildRoadmapCompat();
+  bindUI();
+  renderHead();
+  fillSelects();
+  go('p1');
+}
+function bindUI() {
+  document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.p)));
+  $('bImp').addEventListener('click', () => $('imp').showModal());
+  $('bImpClose').addEventListener('click', () => $('imp').close());
+  $('bExp').addEventListener('click', dlJSON);
+  $('bExp2').addEventListener('click', dlJSON);
+  $('bDemo').addEventListener('click', demo);
+  $('bDemo2').addEventListener('click', demo);
+  $('bReset').addEventListener('click', () => {
+    if (!confirm('Effacer les données locales et recharger les données préchargées ?')) return;
+    localStorage.removeItem(LS); location.reload();
+  });
+  bindImports();
+  bindGBar();
+  $('s1U').addEventListener('change', r1);
+  bindP1Subs();
+  bind8();
+  RENDERS.p1 = r1; RENDERS.p3 = r3; RENDERS.p5 = r5;
+  gfDisables();
+}
+
 function dlJSON() {
   const blob = new Blob([JSON.stringify(D)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -1157,7 +1059,7 @@ function dlJSON() {
 function demo() {
   const base = emptyData();
   const today = new Date().toISOString().slice(0, 10);
-  base.meta = { rm2: 'Démo RM', capa: 'Démo CAPA', plan: 'Démo Planning', prod: 'Démo', maj: today };
+  base.meta = { rm2: 'Démo RM', plan: 'Démo Planning', prod: 'Démo', prev: 'Démo Webhelp', real: 'Démo réalisé', dmt: 'Démo réalisé', mail: 'Démo réalisé', maj: today };
   /* roadmap v2 démo : 18 semaines (S40__2026 → S5__2027), 12 activités, les 9 blocs */
   const nW = 18, w0 = 40, A2 = RM_ALL, F2 = RM_FAM_OF;
   const monday26 = w => addDays('2025-12-29', (w - 1) * 7);
@@ -1211,28 +1113,7 @@ function demo() {
   const dates = [];
   const t0 = new Date(); t0.setDate(t0.getDate() - 45);
   for (let i = 0; i <= 45; i++) { const d = new Date(t0); d.setDate(t0.getDate() + i); dates.push(d.toISOString().slice(0, 10)); }
-  base.capa.dates = dates;
-  base.capa.flux = FLOWS8.map((k, i) => ({
-    k, c: k.startsWith('Mail') ? 'Mail' : 'Voix', a: k.split(' ')[1],
-    prev:  dates.map(d => Math.round((k.startsWith('Mail') ? 60 : 420) + 150 * Math.sin(+d.slice(8) / 3 + i))),
-    contr: dates.map(d => Math.round((k.startsWith('Mail') ? 55 : 380) + 120 * Math.sin(+d.slice(8) / 3 + i))),
-    capa:  dates.map(d => Math.round((k.startsWith('Mail') ? 70 : 460) + 140 * Math.sin(+d.slice(8) / 3 + i + .5)))
-  }));
-  /* capacitaire en heures démo (actes ÷ 10) */
-  base.capa.flux.forEach(f => {
-    f.hrs      = f.capa.map(v => Math.round(v / 10 * 10) / 10);
-    f.hrsPrev  = f.prev.map(v => Math.round(v / 10 * 10) / 10);
-    f.hrsContr = f.contr.map(v => Math.round(v / 10 * 10) / 10);
-  });
-  /* planning démo : heures planifiées par jour × activité voix */
   const past = dates.filter(d => d <= today);
-  const actsV = RFLOW.map(f => f.charAt(0) + f.slice(1).toLowerCase());
-  const hrsDef = { HYPER: [42, 8], C2E: [6, 2], AFR: [18, 4], DRIVE: [16, 4], SAV: [24, 6] };
-  base.planH = { file: 'Démo Planning', maj: today, dates: past.slice(), acts: actsV, f: {} };
-  actsV.forEach(a => {
-    const [bh, amp] = hrsDef[a.toUpperCase()] || [20, 5];
-    base.planH.f[a] = past.map(d => Math.max(2, Math.round(bh + amp * Math.sin(+d.slice(8) / 3))));
-  });
   base.prod = { file: 'Démo', def: { hyper: 10, c2e: 9, afr: 8, drive: 12, sav: 8, 'borne/lsa': 14, chat: 6 } };
   /* DMT démo cohérente : (com + acw) par flux × jour */
   const M = base.dmt; M.file = 'Démo Vonage'; M.maj = today;
@@ -1261,10 +1142,10 @@ function demo() {
   base.pmail = { file: 'Démo Prévision Mail', maj: today, rows: [] };
   past.forEach(d => ML.flows.forEach((f, fi) =>
     base.pmail.rows.push([d, f, Math.round(30 + 22 * Math.sin(+d.slice(8) / 5 + fi))])));
-  /* prévision démo : 1 mois (poids journaliers + créneaux 30 min) */
-  const dmk = '2027-01', nD = 31;
-  const dmo = { appels: { hyper: 15000, c2e: 60, afr: 4200, drive: 13000, sav: 8000, direct: 0 },
-                mails: { hyper: 3300, c2e: 0, afr: 2100, drive: 2900, sav: 0, direct: 0 } };
+  /* prévision démo : 5 mois (poids journaliers + créneaux 30 min) — couvre les semaines RM démo */
+  const dmos = ['2026-09', '2026-10', '2026-11', '2026-12', '2027-01'];
+  const dmoOf = () => ({ appels: { hyper: 15000, c2e: 60, afr: 4200, drive: 13000, sav: 8000, direct: 0 },
+                         mails: { hyper: 3300, c2e: 0, afr: 2100, drive: 2900, sav: 0, direct: 0 } });
   const dj = {}, slotsD = []; for (let t = 730; t <= 2030; t += 30) slotsD.push(t);
   const bell = t => Math.exp(-Math.pow(t - 1130, 2) / (2 * 180 * 180));
   const dcr = {}; PACTS.forEach(f => { dcr[f] = { ls: {}, dim: {} };
@@ -1272,23 +1153,31 @@ function demo() {
       dcr[f].dim[t] = ['hyper', 'afr', 'drive'].includes(f) && t >= 800 && t <= 1230 ? bell(t) * 3.2 : 0; });
     ['ls', 'dim'].forEach(p => { const s = Object.values(dcr[f][p]).reduce((x, y) => x + y, 0);
       if (s > 0) Object.keys(dcr[f][p]).forEach(t => dcr[f][p][t] = Math.round(dcr[f][p][t] / s * 1e6) / 1e6); }); });
-  const wsumD = { a: 0, m: 0 };
-  for (let d = 1; d <= nD; d++) {
-    const dk = dmk + '-' + String(d).padStart(2, '0');
-    const wd = new Date(dk + 'T00:00:00').getDay();
-    const P = Math.pow(wd === 0 ? 0.25 : wd === 6 ? 0.7 : 1.08, wd === 0 ? 2 : 1);
-    dj[dk] = { a: { hyper: P, c2e: P, afr: P, drive: P, sav: P, direct: 0 },
-               m: { hyper: P, c2e: 0, afr: P, drive: P, sav: 0, direct: 0 } };
-    wsumD.a += P; wsumD.m += P;
-  }
-  Object.keys(dj).forEach(dk => { ['a', 'm'].forEach(c => Object.keys(dj[dk][c]).forEach(f =>
-    dj[dk][c][f] = Math.round(dj[dk][c][f] / wsumD[c] * 1e6) / 1e6)); });
-  base.prev = { meta: { file: 'Démo Webhelp', maj: today, snapshot: today }, mois: { [dmk]: dmo },
-    poidsJour: dj, poidsChat: {}, creneaux: { [dmk]: dcr } };
-  /* planification démo : 12 agents prod + 4 FIM (hors prod) + allaitement pour 1 agent */
+  const creD = {};
+  dmos.forEach(mk => {
+    creD[mk] = dcr;
+    const nD = new Date(+mk.slice(0, 4), +mk.slice(5, 7), 0).getDate();
+    const wsumD = { a: 0, m: 0 }, raw = {};
+    for (let d = 1; d <= nD; d++) {
+      const dk = mk + '-' + String(d).padStart(2, '0');
+      const wd = new Date(dk + 'T00:00:00').getDay();
+      const P = Math.pow(wd === 0 ? 0.25 : wd === 6 ? 0.7 : 1.08, wd === 0 ? 2 : 1);
+      raw[dk] = { a: { hyper: P, c2e: P, afr: P, drive: P, sav: P, direct: 0 },
+                  m: { hyper: P, c2e: 0, afr: P, drive: P, sav: 0, direct: 0 } };
+      wsumD.a += P; wsumD.m += P;
+    }
+    Object.keys(raw).forEach(dk => { ['a', 'm'].forEach(c => Object.keys(raw[dk][c]).forEach(f =>
+      raw[dk][c][f] = Math.round(raw[dk][c][f] / wsumD[c] * 1e6) / 1e6)); });
+    Object.assign(dj, raw);
+  });
+  base.prev = { meta: { file: 'Démo Webhelp', maj: today, snapshot: today },
+    mois: Object.fromEntries(dmos.map(mk => [mk, dmoOf()])),
+    poidsJour: dj, poidsChat: {}, creneaux: creD };
+  /* planification démo : agents avec compétences (feuille Skills) + agents FIM (hors prod) */
+  const lotsD = [['LOT 1 & LOT 2'], ['LOT 3'], ['LOT 4'], ['LOT UNIQUE']];
   const agentsD = [];
-  for (let i = 0; i < 12; i++) agentsD.push({ n: 'Agent LOT ' + (i + 1), fim: false, alla: i === 2 ? 1 : 0 });
-  for (let i = 0; i < 4; i++) agentsD.push({ n: 'Agent FIM ' + (i + 1), fim: true, alla: 0 });
+  for (let i = 0; i < 4; i++) lotsD.forEach(([lot]) => agentsD.push({ n: 'Agent ' + lot + ' ' + (i + 1), lot }));
+  for (let i = 0; i < 4; i++) agentsD.push({ n: 'Agent FIM ' + (i + 1), lot: 'FIM' });
   const dr = [];
   past.forEach((d, di) => {
     const wd = new Date(d + 'T00:00:00').getDay();
@@ -1297,14 +1186,31 @@ function demo() {
       const sin = 10 * 60 + (ai % 3) * 30;
       const sout = sin + (wd === 0 ? 5 : 9) * 60 - (wd === 6 ? 2 * 60 : 0);
       const r1 = sin + 240, r2 = r1 + 60;
-      dr.push({ ok: true, d, ag: a.n, fimrow: a.fim, sin, sout, r1, r2,
-        hp: (sout - sin - 60) / 60, alla: a.alla, fim: a.fim ? (sout - sin - 60) / 60 : 0 });
+      dr.push({ ok: true, d, ag: a.n, lot: norm(a.lot), fimrow: a.lot === 'FIM', sin, sout, r1, r2,
+        hp: (sout - sin - 60) / 60, fim: a.lot === 'FIM' ? (sout - sin - 60) / 60 : 0 });
     });
   });
   base.plan = planAgg(dr);
   base.plan.meta = Object.assign(base.plan.meta, { file: 'Démo Planning', maj: today });
+  base.plan.rows = dr.filter(r => !r.fimrow);
+  base.skills = { meta: { file: 'Démo Planning', maj: today },
+    by: Object.fromEntries(agentsD.filter(a => a.lot !== 'FIM')
+      .map((a, i) => ['wd:90000' + i, { sk: lotToSkill(a.lot) || 'ALL', lot: a.lot }])) };
+  D = base; ensure();
+  buildPlanExtras();
+  /* heures de log réalisées démo (EXT_Agent) : ~60-85 % des heures planifiées par canal */
+  const lrD = { meta: { file: 'Démo EXT_Agent', maj: today }, dates: past.slice(), h: { PHONE: [], CHAT: [], tot: [] } };
+  past.forEach(d => {
+    const BA = base.plan.byAct[d] || {};
+    const hpP = Object.entries(BA).reduce((s, [k, h]) => s + (k.endsWith('|PHONE') ? h : 0), 0);
+    const hpC = Object.entries(BA).reduce((s, [k, h]) => s + (k.endsWith('|CHAT') ? h : 0), 0);
+    const f = 0.6 + 0.25 * Math.abs(Math.sin(+d.slice(8) / 2));
+    const p = Math.round(hpP * f * 100) / 100, c = Math.round(hpC * f * 100) / 100;
+    lrD.h.PHONE.push(p); lrD.h.CHAT.push(c); lrD.h.tot.push(Math.round((p + c) * 100) / 100);
+  });
+  base.logR = lrD;
   /* réalisé démo : DRM voix cohérent avec la capacitaire */
-  const R = base.real; R.file = 'Démo DRM'; R.maj = today;
+  const R = base.real; R.file = 'Démo réalisé'; R.maj = today;
   past.forEach(d => {
     R.dates.push(d); R.sem.push(isoWeek(d)); R.jours.push(jJours(d));
     RFLOW.forEach((fl, fi) => {
@@ -1313,7 +1219,7 @@ function demo() {
       R.f[fl].r.push(rec); R.f[fl].t.push(tr); R.f[fl].s.push(Math.round(tr * 0.62));
     });
   });
-  D = base; ensure();
+  D = base;
   buildRoadmapCompat();
   renderHead(); fillSelects(); go('p1');
 }
@@ -1322,31 +1228,36 @@ function demo() {
    SÉLECTEURS COMMUNS
    ===================================================================== */
 function fillSelects() {
-  /* p1 : semaine analysée (modèle RM v2) — périmètre piloté par les filtres globaux */
   const R = D.rm2;
-  const sw = $('w1W');
-  if (R && R.weeks && R.weeks.length) {
-    const curW = sw.value;
-    sw.innerHTML = R.weeks.map((w, i) => `<option value="${i}">${w.k} · du ${w.start ? dShort(w.start) : '?'} </option>`).join('');
-    const t = new Date().toISOString().slice(0, 10);
-    const defI = Math.max(0, R.weeks.findIndex(w => w.start && w.start >= t) >= 0
-      ? R.weeks.findIndex(w => w.start && w.start >= t) : R.weeks.length - 1);
-    sw.value = [...sw.options].some(o => o.value === curW) ? curW : String(defI);
-  } else { sw.innerHTML = ''; }
+  const RW = !!(R && R.weeks && R.weeks.length);
+  /* p1 vue annuelle : années + mois */
+  const yrs = RW ? [...new Set(R.weeks.map(w => w.y))].sort() : [];
+  fillSel('w1Y', [['', 'Toutes']].concat(yrs.map(y => [String(y), String(y)])));
+  fillW1Months();
+  /* p1 vues journalière / créneaux : années + semaines */
+  const days = rmDays();
+  const yrsD = [...new Set(days.map(d => d.slice(0, 4)))].sort();
+  ['J', 'C'].forEach(pf => {
+    fillSel('w1' + pf + 'Y', [['', 'Toutes']].concat(yrsD.map(y => [y, y])));
+    fillW1Weeks(pf);
+  });
+  /* année courante par défaut (journalière / créneaux) */
+  const yNow = String(new Date().getFullYear());
+  ['J', 'C'].forEach(pf => {
+    const el = $('w1' + pf + 'Y');
+    if (!el.value && [...el.options].some(o => o.value === yNow)) { el.value = yNow; fillW1Weeks(pf); }
+  });
+  fillW1Days();
   /* sources */
-  $('w1Src').textContent = R && R.weeks && R.weeks.length
-    ? 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') + ' · ' + R.weeks.length + ' sem.'
-    : 'Modèle RM : à importer';
-  $('w2Src').textContent = 'Capacitaire : ' + (D.capa.dates.length ? D.meta.capa : '—');
-  $('w3Src').textContent = 'Planification : ' + (D.plan && D.plan.dates && D.plan.dates.length ? ((D.plan.meta && D.plan.meta.file) || 'importée') + ' (' + D.plan.dates.length + ' j)' : 'à importer') +
-    (D.capa.dates.length ? ' · Capacitaire : ' + (D.meta.capa || 'importée') : '') +
-    (D.rm2 ? ' · Modèle RM : ' + (D.meta.rm2 || (D.rm2.meta && D.rm2.meta.file) || 'RM') : '');
-  $('w5Src').textContent = 'Phone : DRM + Vonage · Mail : Export Mail · Chat : —';
-  fill4();
-  $('w4Src').textContent = prevHas()
-    ? 'Prévision Webhelp : ' + (D.meta.prev || (D.prev.meta && D.prev.meta.file) || 'Webhelp') +
-      (D.prev.meta && D.prev.meta.snapshot ? ' · au ' + dShort(D.prev.meta.snapshot) : '')
-    : 'Prévision Webhelp : à importer';
+  $('w1Src').textContent = RW ? 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') + ' · ' + R.weeks.length + ' sem.'
+                              : 'Modèle RM : à importer';
+  $('w1JSrc').textContent = RW ? 'Capa du modèle RM répartie par jour selon les poids de la Prévision Webhelp'
+                              : 'Vue journalière : modèle RM à importer';
+  $('w1CSrc').textContent = RW ? 'Capa du modèle RM répartie par créneau 30 min (poids journaliers + créneaux de la prévision)'
+                              : 'Vue créneaux : modèle RM à importer';
+  $('w3Src').textContent = 'Capa roadmap : ' + (RW ? 'modèle RM (' + R.weeks.length + ' sem.) × poids de la prévision' : 'modèle RM à importer') +
+    ' · Capa planif : ' + (D.plan && D.plan.dates && D.plan.dates.length ? ((D.plan.meta && D.plan.meta.file) || 'importée') + ' (' + D.plan.dates.length + ' j)' : 'à importer');
+  $('w5Src').textContent = 'Phone : EXT_Entrant (Données DASHBOARD CAPA) · Mail : EXT_Email · Chat : —';
   renderProdEd();
 }
 
@@ -1360,9 +1271,7 @@ function perBounds(p) {                                            // bornes de 
                    const s = R2.weeks[0].start, e = R2.weeks[R2.weeks.length - 1].end || R2.weeks[R2.weeks.length - 1].start;
                    return s && e ? [s, e] : []; }
                  return []; }
-    case 'p2': { const d = D.capa.dates; return d.length ? [d[0], d[d.length - 1]] : []; }
-    case 'p3': { const d = [...D.capa.dates, ...D.planH.dates].filter(Boolean).sort();
-                 return d.length ? [d[0], d[d.length - 1]] : []; }
+    case 'p3': { const d = (D.plan && D.plan.dates) || []; return d.length ? [d[0], d[d.length - 1]] : []; }
     case 'p5': { const d = [...D.real.dates, ...D.mail.dates].filter(Boolean).sort();
                  return d.length ? [d[0], d[d.length - 1]] : []; }
     case 'p8': { const d = (D.plan && D.plan.dates) || []; return d.length ? [d[0], d[d.length - 1]] : []; }
@@ -1416,15 +1325,101 @@ function rmQEacts(acts, i) {                      // QE = Σ capacité actes / �
   });
   return p > 0 ? c / p : null;
 }
-function rmWindow(saI) {
-  const W = D.rm2.weeks.length, f = $('w1F').value;
-  if (f === 'all') return Array.from({ length: W }, (_, i) => i);
-  const n = +f, back = n >= 27 ? 13 : 4, fwd = n >= 27 ? 13 : 8;
-  const a = Math.max(0, saI - back), b = Math.min(W - 1, saI + fwd);
-  const out = []; for (let i = a; i <= b; i++) out.push(i);
+/* ---------- sous-onglets Roadmap (annuelle · journalière · créneaux) ---------- */
+const P1V = { view: 'ann' };
+function rmWeekOfDay(d) {                            // index de la semaine RM contenant d
+  const R = D.rm2; if (!R || !R.weeks) return -1;
+  for (let i = 0; i < R.weeks.length; i++) {
+    const w = R.weeks[i], st = w.start || '', en = w.end || (st ? addDays(st, 6) : '');
+    if (st && d >= st && d <= en) return i;
+  }
+  return -1;
+}
+function rmWeeksFiltered(y, m) {                     // semaines filtrées par année + mois (chevauchement)
+  const R = D.rm2; if (!R || !R.weeks) return [];
+  const out = [];
+  R.weeks.forEach((w, i) => {
+    const st = w.start || '', en = w.end || (st ? addDays(st, 6) : '');
+    if (y && String(w.y) !== String(y)) return;
+    if (m) {
+      if (!st) return;
+      const ym = String(y || st.slice(0, 4)) + '-' + m;
+      if (!(st <= ym + '-31' && en >= ym + '-01')) return;
+    }
+    out.push(i);
+  });
   return out;
 }
+function rmWeeksSel() { return rmWeeksFiltered($('w1Y').value, $('w1M').value); }
 function r1() {
+  if (P1V.view === 'jour') return r1Jour();
+  if (P1V.view === 'cre') return r1Cre();
+  return r1Ann();
+}
+function bindP1Subs() {
+  document.querySelectorAll('#p1subs button').forEach(b => b.addEventListener('click', () => {
+    P1V.view = b.dataset.v;
+    document.querySelectorAll('#p1subs button').forEach(x => x.classList.toggle('on', x === b));
+    $('p1fAnn').style.display = P1V.view === 'ann' ? '' : 'none';
+    $('p1fJour').style.display = P1V.view === 'jour' ? '' : 'none';
+    $('p1fCre').style.display = P1V.view === 'cre' ? '' : 'none';
+    $('p1vAnn').style.display = P1V.view === 'ann' ? '' : 'none';
+    $('p1vJour').style.display = P1V.view === 'jour' ? '' : 'none';
+    $('p1vCre').style.display = P1V.view === 'cre' ? '' : 'none';
+    gfDisables(); r1();
+  }));
+  $('w1Y').addEventListener('change', () => { fillW1Months(); r1(); });
+  $('w1M').addEventListener('change', r1);
+  $('w1JY').addEventListener('change', () => { fillW1Weeks('J'); r1(); });
+  $('w1JM').addEventListener('change', () => { fillW1Weeks('J'); r1(); });
+  ['w1JW', 'w1JA', 'w1JB'].forEach(id => $(id).addEventListener('change', r1));
+  $('w1CY').addEventListener('change', () => { fillW1Weeks('C'); fillW1Days(); r1(); });
+  $('w1CM').addEventListener('change', () => { fillW1Weeks('C'); fillW1Days(); r1(); });
+  ['w1CW', 'w1CA', 'w1CB', 'w1CV', 'w1CD'].forEach(id => $(id).addEventListener('change', r1));
+}
+function fillSel(id, opts) {                         // remplit un select en conservant la sélection
+  const el = $(id), cur = el.value;
+  el.innerHTML = opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+  el.value = [...el.options].some(o => o.value === cur) ? cur
+    : (opts[1] ? opts[1][0] : (opts[0] ? opts[0][0] : ''));
+}
+function fillW1Months() {                            // mois disponibles selon l'année (semaines RM)
+  const R = D.rm2, y = $('w1Y').value, ms = new Set();
+  (R && R.weeks || []).forEach(w => {
+    if (y && String(w.y) !== y) return;
+    if (w.start && (!y || w.start.slice(0, 4) === y)) ms.add(w.start.slice(5, 7));
+    if (w.end && (!y || w.end.slice(0, 4) === y)) ms.add(w.end.slice(5, 7));
+  });
+  fillSel('w1M', [['', 'Tous']].concat([...ms].sort().map(m => [m, MOIS[+m - 1]])));
+}
+function fillW1Weeks(pf) {                           // semaines disponibles (vue journalière / créneaux)
+  let days = rmDays();
+  const y = $('w1' + pf + 'Y').value, m = $('w1' + pf + 'M').value;
+  if (y) days = days.filter(d => d.slice(0, 4) === y);
+  if (m) days = days.filter(d => d.slice(5, 7) === m);
+  const ws = [...new Set(days.map(wLabY))].sort();
+  fillSel('w1' + pf + 'W', [['', 'Toutes']].concat(ws.map(w => [w, w])));
+}
+function fillW1Days() {                              // bornes du jour précis (vue créneaux)
+  const days = rmDays(), el = $('w1CD');
+  if (!days.length) { el.value = ''; el.min = ''; el.max = ''; return; }
+  el.min = days[0]; el.max = days[days.length - 1];
+  if (!days.includes(el.value)) el.value = days[Math.min(days.length - 1, Math.floor(days.length / 2))];
+}
+function r1jDays(pf) {                               // jours retenus par les filtres année/mois/semaine/perso
+  let days = rmDays();
+  const y = $('w1' + pf + 'Y').value, m = $('w1' + pf + 'M').value, w = $('w1' + pf + 'W').value,
+        a = $('w1' + pf + 'A').value, b = $('w1' + pf + 'B').value;
+  if (y) days = days.filter(d => d.slice(0, 4) === y);
+  if (m) days = days.filter(d => d.slice(5, 7) === m);
+  if (w) days = days.filter(d => wLabY(d) === w);
+  if (a) days = days.filter(d => d >= a);
+  if (b) days = days.filter(d => d <= b);
+  return days;
+}
+
+/* ---------- vue annuelle (par semaine) ---------- */
+function r1Ann() {
   const R = D.rm2;
   const C1 = ['c1a', 'c1b', 'c1c', 'c1d', 'c1e', 'c1f', 'c1g', 'c1h', 'c1i'];
   const blank = () => {
@@ -1437,12 +1432,9 @@ function r1() {
   const acts = rmActsSel();
   const perLbl = gfLbl();
   const W = R.weeks.length;
-  const saI = Math.min(W - 1, Math.max(0, +($('w1W').value || 0) || 0));
-  const win = rmWindow(saI).filter(i => {                        // + filtre de période / intervalle global
-    const w = R.weeks[i], e = w.end || w.start;
-    return (!GF.a || e >= GF.a) && (!GF.b || w.start <= GF.b); });
+  const win = rmWeeksSel();
   if (!win.length) {
-    $('k1').innerHTML = '<div class="kpi"><div class="lbl">Aucune semaine sur la période</div><div class="sub">Élargissez la Période ou l\'Intervalle dans la barre de filtres.</div></div>';
+    $('k1').innerHTML = '<div class="kpi"><div class="lbl">Aucune semaine sur la période</div><div class="sub">Élargissez les filtres Année / Mois de la vue annuelle.</div></div>';
     C1.forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
     $('t1').innerHTML = ''; $('h1').textContent = ''; $('t1Per').textContent = '—';
     return;
@@ -1456,29 +1448,26 @@ function r1() {
   const F = { qe: Array(W).fill(null) };
   secs.forEach(s => { F[s] = rmAggM(s, acts) || Array(W).fill(null); });
   for (let i = 0; i < W; i++) F.qe[i] = rmQEacts(acts, i);
-  const pI = saI > 0 ? saI - 1 : null;
-  const dPts = (a, b) => a != null && b != null ? ' · Δ ' + (a - b >= 0 ? '+' : '') + (Math.round((a - b) * 1000) / 10) + ' pts' : '';
   const dPct = (a, b) => a != null && b != null && b !== 0 ? ' · Δ ' + (a >= b ? '+' : '') + (Math.round((a / b - 1) * 1000) / 10) + ' %' : '';
   const pc1 = v => v == null ? '—' : (Math.round(v * 1000) / 10) + ' %';
-  const wSA = R.weeks[saI];
-
-  /* ---- KPIs de la semaine analysée ---- */
-  const qe = F.qe[saI], pf = F.pfin[saI], ca = F.capa_a[saI];
-  const dE = F.delta_etp[saI], ep = F.eff_prod[saI], ab = F.abs[saI], oc = F.occ[saI];
+  /* ---- KPIs de la période (années / mois sélectionnés) ---- */
+  const sum = k => win.reduce((s, i) => s + (F[k][i] != null ? F[k][i] : 0), 0);
+  const avg = k => { const vs = win.map(i => F[k][i]).filter(v => v != null);
+    return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null; };
+  const qeP = sum('pfin') > 0 ? sum('capa_a') / sum('pfin') : null;
+  const dE = sum('eff_prod') - sum('bes_etp');
+  const wLast = R.weeks[win[win.length - 1]];
   $('k1').innerHTML =
-    kpi('SLA / QE — ' + perLbl, pc1(qe), 'capa actes / prévision finale' + dPts(qe, pI != null ? F.qe[pI] : null) +
-        ' · cible ' + pc1(F.cible[saI]), qe != null ? Math.min(100, qe * 100) : 0) +
-    kpi('Prévision finale', pf == null ? '—' : fmt(Math.round(pf)), 'actes · ' + wSA.k + dPct(pf, pI != null ? F.pfin[pI] : null)) +
-    kpi('Capacité actes', ca == null ? '—' : fmt(Math.round(ca)), 'couverture ' + pctS(ca, pf)) +
-    kpi('Heures de log', F.capa_hlog[saI] == null ? '—' : fmt(Math.round(F.capa_hlog[saI])) + ' h',
-        'besoin ' + (F.bes_hlog[saI] != null ? fmt(Math.round(F.bes_hlog[saI])) + ' h' : '—') +
-        ' · capa prod ' + (F.capa_hprod[saI] != null ? fmt(Math.round(F.capa_hprod[saI])) + ' h' : '—')) +
-    kpi('Écart ETP', dE == null ? '—' : (dE >= 0 ? '+' : '') + fmt1(dE),
-        'capacité − besoin' + (dE == null ? '' : dE >= 0 ? ' · surplus' : ' · tension')) +
-    kpi('Effectif productif', ep == null ? '—' : fmt1(ep) + ' ETP',
-        'besoin ' + (F.bes_etp[saI] != null ? fmt1(F.bes_etp[saI]) + ' ETP' : '—')) +
-    kpi('Absentéisme', pc1(ab), 'hypothèse du modèle RM') +
-    kpi("Taux d'occupation", pc1(oc), 'hypothèse pondérée', oc != null ? oc * 100 : 0);
+    kpi('SLA / QE — ' + perLbl, pc1(qeP), 'capa actes / prévision finale · cible ' + pc1(avg('cible')), qeP != null ? Math.min(100, qeP * 100) : 0) +
+    kpi('Prévision finale', fmt(Math.round(sum('pfin'))), 'actes · ' + labels[0] + ' → ' + labels[labels.length - 1]) +
+    kpi('Capacité actes', fmt(Math.round(sum('capa_a'))), 'couverture ' + pctS(sum('capa_a'), sum('pfin'))) +
+    kpi('Heures de log', fmt(Math.round(sum('capa_hlog'))) + ' h',
+        'besoin ' + fmt(Math.round(sum('bes_hlog'))) + ' h · capa prod ' + fmt(Math.round(sum('capa_hprod'))) + ' h') +
+    kpi('Écart ETP', fmt1(dE), 'capacité − besoin' + (dE >= 0 ? ' · surplus' : ' · tension')) +
+    kpi('Effectif productif', F.eff_prod[wLast ? win[win.length - 1] : 0] == null ? '—' : fmt1(F.eff_prod[win[win.length - 1]]) + ' ETP',
+        'dernière semaine affichée (' + (wLast ? wLast.k : '—') + ')') +
+    kpi('Absentéisme', pc1(avg('abs')), 'hypothèse du modèle RM (moyenne)') +
+    kpi("Taux d'occupation", pc1(avg('occ')), 'hypothèse pondérée (moyenne)', avg('occ') != null ? avg('occ') * 100 : 0);
 
   /* ---- réglages communs des graphiques ---- */
   const u = $('s1U').value;
@@ -1607,271 +1596,521 @@ function r1() {
   notes.push('QE = capacité actes ÷ prévision finale · DMT / TO / absentéisme agrégés en pondéré (poids : prévision ou effectif).');
   $('h1').textContent = notes.join(' ');
   $('w1Src').textContent = 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') +
-    ' · ' + W + ' sem. (' + R.weeks[0].k + ' → ' + R.weeks[W - 1].k + ') · ' + perLbl;
+    ' · ' + win.length + '/' + W + ' sem. (' + (R.weeks[win[0]] || {}).k + ' → ' + (R.weeks[win[win.length - 1]] || {}).k + ') · ' + perLbl;
 }
+
+/* ---------- vue journalière (poids de la prévision Webhelp) ---------- */
+function r1Jour() {
+  const R = D.rm2;
+  const CJ = ['c1ja', 'c1jb', 'c1jc', 'c1jd', 'c1je', 'c1jf', 'c1jg', 'c1jh'];
+  const blank = msg => {
+    $('k1j').innerHTML = '<div class="kpi"><div class="lbl">' + msg + '</div></div>';
+    CJ.forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
+    $('t1j').innerHTML = ''; $('h1j').textContent = ''; $('t1jPer').textContent = '—';
+    $('w1JSrc').textContent = 'Vue journalière : indisponible';
+  };
+  if (!R || !R.weeks || !R.weeks.length) { blank('Aucun modèle RM — importez le modèle RM (onglet AUCHAN)'); return; }
+  const days = r1jDays('J');
+  if (!days.length) { blank('Aucun jour sur la période — élargissez Année / Mois / Semaine / Personnalisé'); return; }
+  const acts = rmActsSel();
+  const perLbl = gfLbl();
+  if (!acts.length) { blank('Aucune activité dans ce périmètre — ajustez les filtres Flux / Channel / Activités'); return; }
+  /* matrices journalières : capa hebdo du modèle RM répartie au prorata des poids de la prévision */
+  const secs = ['capa_a', 'pfin', 'capa_hlog', 'bes_hlog', 'capa_hprod', 'bes_hprod', 'bes_etp', 'eff', 'eff_prod'];
+  const MD = {}; secs.forEach(s => MD[s] = rmDaily(s));
+  const volOf = sec => { const M = MD[sec], out = days.map(() => 0); let any = false;
+    acts.forEach(k => { const a = M.by[k]; if (!a) return;
+      days.forEach((d, i) => { const v = a[M.dates.indexOf(d)]; if (v != null) { out[i] += v; any = true; } }); });
+    return { v: out.map(x => Math.round(x * 10) / 10), any }; };
+  const rateOf = sec => { const A = rmAggM(sec, acts);
+    return days.map(d => { const i = rmWeekOfDay(d); return i >= 0 && A && A[i] != null ? A[i] : null; }); };
+  const CA = volOf('capa_a'), PF = volOf('pfin'), CHL = volOf('capa_hlog'), BHL = volOf('bes_hlog'),
+        CHP = volOf('capa_hprod'), BHP = volOf('bes_hprod'), BE = volOf('bes_etp'), EP = volOf('eff_prod');
+  const QE = days.map((d, i) => PF.v[i] > 0 ? CA.v[i] / PF.v[i] : null);
+  const DMT = rateOf('dmt'), OCC = rateOf('occ'), ABS = rateOf('abs'), CG = rateOf('conges'), CIB = rateOf('cible');
+  const tCA = CA.v.reduce((a, b) => a + b, 0), tPF = PF.v.reduce((a, b) => a + b, 0);
+  const tCH = CHL.v.reduce((a, b) => a + b, 0), tBH = BHL.v.reduce((a, b) => a + b, 0);
+  const dE = EP.v.reduce((a, b) => a + b, 0) - BE.v.reduce((a, b) => a + b, 0);
+  const avgN = a => { const vs = a.filter(v => v != null); return vs.length ? vs.reduce((x, y) => x + y, 0) / vs.length : null; };
+  const pc1 = v => v == null ? '—' : (Math.round(v * 1000) / 10) + ' %';
+  const iMax = CA.v.indexOf(Math.max(...CA.v));
+  $('k1j').innerHTML =
+    kpi('Capa roadmap (actes)', fmt(Math.round(tCA)), days.length + ' j · ' + gfLbl()) +
+    kpi('Prévision finale', fmt(Math.round(tPF)), 'couverture ' + pctS(tCA, tPF)) +
+    kpi('SLA / QE', pc1(tPF > 0 ? tCA / tPF : null), 'capa actes / prévision', tPF > 0 ? Math.min(100, tCA / tPF * 100) : 0) +
+    kpi('Capa heures de log', fmt(Math.round(tCH)) + ' h', 'besoin ' + fmt(Math.round(tBH)) + ' h') +
+    kpi('Écart ETP', fmt1(dE), dE >= 0 ? 'sur-capacité' : 'sous-capacité') +
+    (tCA ? kpi('Jour le plus chargé', fmt(Math.round(CA.v[iMax])), dShort(days[iMax]) + ' · ' + jJours(days[iMax])) : '') +
+    kpi('Absentéisme (moy.)', pc1(avgN(ABS)), 'hypothèse du modèle RM') +
+    kpi("Taux d'occupation (moy.)", pc1(avgN(OCC)), 'hypothèse pondérée', OCC.some(v => v != null) ? Math.min(100, avgN(OCC) * 100) : 0);
+
+  const xJ = { grid: { display: false }, ticks: { maxTicksLimit: 16 } };
+  const labJ = days.map(dShort);
+  const optJ = (yOpts, tip) => ({ maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { position: 'bottom' },
+      tooltip: { callbacks: { title: c => dLab(days[c[0].dataIndex]) + ' (' + jJours(days[c[0].dataIndex]) + ')',
+        label: tip || (c => ' ' + c.dataset.label + ' : ' + fmt(c.parsed.y ?? c.parsed)) } } },
+    scales: { x: xJ, y: yOpts } });
+  const yV = lab => ({ beginAtZero: true, grid: GRID, ticks: { callback: v => fmt(v) },
+    title: { display: true, text: lab, font: { size: 10.5 } } });
+  const yP = { beginAtZero: true, grid: GRID, ticks: { callback: v => v + ' %' } };
+
+  mkChart('c1ja', { type: 'bar', data: { labels: labJ, datasets: [
+      { label: 'Capa roadmap (actes)', data: CA.v, backgroundColor: '#3b5bdb', borderRadius: 3 },
+      { label: 'Prévision finale', data: PF.v, type: 'line', borderColor: '#1b2440', borderWidth: 2, pointRadius: 0, tension: .3 }] },
+    options: optJ(yV('actes / jour')) });
+  mkChart('c1jb', { type: 'bar', data: { labels: labJ, datasets: [
+      { label: 'Capa h log', data: CHL.v, backgroundColor: '#3b5bdb', borderRadius: 3 },
+      { label: 'Besoin h log', data: BHL.v, backgroundColor: '#e8590c', borderRadius: 3 },
+      { label: 'Capa h prod', data: CHP.v, type: 'line', borderColor: '#1098ad', borderWidth: 1.5, pointRadius: 0, tension: .3 }] },
+    options: optJ(yV('heures / jour'), c => ' ' + c.dataset.label + ' : ' + fmt(c.parsed.y ?? 0) + ' h') });
+  mkChart('c1jc', { type: 'line', data: { labels: labJ, datasets: [
+      { label: 'QE', data: QE.map(v => v == null ? null : Math.round(v * 1000) / 10), borderColor: '#3b5bdb', borderWidth: 2.5, pointRadius: 2, tension: .3, spanGaps: true },
+      { label: 'Cible', data: CIB.map(v => v == null ? null : Math.round(v * 1000) / 10), borderColor: '#1b2440', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, spanGaps: true },
+      { label: 'Seuil 95 %', data: labJ.map(() => 95), borderColor: '#2f9e44', borderWidth: 1, borderDash: [3, 5], pointRadius: 0 },
+      { label: 'Seuil 90 %', data: labJ.map(() => 90), borderColor: '#e03131', borderWidth: 1, borderDash: [3, 5], pointRadius: 0 }] },
+    options: optJ({ beginAtZero: false, grid: GRID, ticks: { callback: v => v + ' %' } },
+      c => ' ' + c.dataset.label + ' : ' + (c.parsed.y == null ? '—' : c.parsed.y + ' %')) });
+  mkChart('c1jd', { type: 'bar', data: { labels: labJ, datasets: [
+      { label: 'Besoin ETP', data: BE.v, backgroundColor: '#e8590c', borderRadius: 3 },
+      { label: 'Effectif productif', data: EP.v, backgroundColor: '#7048e8', borderRadius: 3 }] },
+    options: optJ(yV('ETP'), c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y ?? 0)) });
+  mkChart('c1je', { type: 'line', data: { labels: labJ, datasets: [
+      { label: 'DMT', data: DMT.map(v => v == null ? null : Math.round(v)), borderColor: '#1b2440', borderWidth: 2.5, pointRadius: 2, tension: .3, spanGaps: true }] },
+    options: optJ({ beginAtZero: true, grid: GRID, ticks: { precision: 0 }, title: { display: true, text: 'secondes', font: { size: 10.5 } } },
+      c => ' ' + c.dataset.label + ' : ' + (c.parsed.y == null ? '—' : Math.round(c.parsed.y) + ' s')) });
+  mkChart('c1jf', { type: 'line', data: { labels: labJ, datasets: [
+      { label: "Taux d'occupation", data: OCC.map(v => v == null ? null : Math.round(v * 1000) / 10), borderColor: '#7048e8', borderWidth: 2.5, pointRadius: 2, tension: .3, spanGaps: true }] },
+    options: optJ(yP, c => ' ' + c.dataset.label + ' : ' + (c.parsed.y == null ? '—' : c.parsed.y + ' %')) });
+  mkChart('c1jg', { type: 'bar', data: { labels: labJ, datasets: [
+      { label: 'Absentéisme', data: ABS.map(v => v == null ? null : Math.round(v * 1000) / 10), backgroundColor: '#e8590c', borderRadius: 3 }] },
+    options: optJ(yP, c => ' ' + c.dataset.label + ' : ' + (c.parsed.y == null ? '—' : c.parsed.y + ' %')) });
+  mkChart('c1jh', { type: 'bar', data: { labels: labJ, datasets: [
+      { label: 'Congés (taux)', data: CG.map(v => v == null ? null : Math.round(v * 1000) / 10), backgroundColor: '#1098ad', borderRadius: 3 }] },
+    options: optJ(yP, c => ' ' + c.dataset.label + ' : ' + (c.parsed.y == null ? '—' : c.parsed.y + ' %')) });
+
+  const fmtC = { vol: v => v == null ? '—' : fmt(Math.round(v)), e: v => v == null ? '—' : fmt1(v),
+    pc: v => v == null ? '—' : (Math.round(v * 1000) / 10) + ' %', s: v => v == null ? '—' : Math.round(v) + ' s' };
+  const cols = [['Prévu final', PF.v, fmtC.vol], ['Capa actes', CA.v, fmtC.vol], ['QE', QE, fmtC.pc], ['Cible', CIB, fmtC.pc],
+    ['Capa h log', CHL.v, fmtC.vol], ['Besoin h log', BHL.v, fmtC.vol], ['Capa h prod', CHP.v, fmtC.vol], ['Besoin h prod', BHP.v, fmtC.vol],
+    ['Besoin ETP', BE.v, fmtC.e], ['Eff. productif', EP.v, fmtC.e], ['DMT', DMT, fmtC.s], ['Occup.', OCC, fmtC.pc],
+    ['Abs.', ABS, fmtC.pc], ['Congés', CG, fmtC.pc]];
+  let h = '<thead><tr><th>Date</th><th>Jour</th>' + cols.map(c => `<th>${c[0]}</th>`).join('') + '</tr></thead><tbody>';
+  days.forEach((d, i) => {
+    h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td>` +
+      cols.map(([, a, f]) => `<td>${f(a[i])}</td>`).join('') + '</tr>';
+  });
+  h += `</tbody><tfoot><tr><td colspan="2">${perLbl} · ${days.length} j</td>`;
+  cols.forEach(([, a, f], ci) => {
+    const vs = a.filter(v => v != null);
+    if (!vs.length) { h += '<td>—</td>'; return; }
+    if (['Prévu final', 'Capa actes', 'Capa h log', 'Besoin h log', 'Capa h prod', 'Besoin h prod'].includes(cols[ci][0]))
+      h += '<td>' + fmt(Math.round(vs.reduce((x, y) => x + y, 0))) + '</td>';
+    else if (['Besoin ETP', 'Eff. productif'].includes(cols[ci][0]))
+      h += '<td>' + fmt1(vs.reduce((x, y) => x + y, 0)) + '</td>';
+    else if (cols[ci][0] === 'DMT') h += '<td>' + Math.round(vs.reduce((x, y) => x + y, 0) / vs.length) + ' s</td>';
+    else h += '<td>' + fmtC.pc(vs.reduce((x, y) => x + y, 0) / vs.length) + '</td>';
+  });
+  h += '</tr></tfoot>';
+  $('t1j').innerHTML = h;
+  $('t1jPer').textContent = perLbl;
+  $('h1j').textContent =
+    'Capa journalière = capa hebdomadaire du modèle RM répartie par jour au prorata des poids de la prévision Webhelp ' +
+    '(normalisés sur les jours de chaque semaine). ' +
+    'SLA/QE du jour = capa actes ÷ prévision finale · DMT / TO / absentéisme / congés = hypothèses hebdomadaires du modèle RM (constantes sur la semaine).';
+  $('w1JSrc').textContent = 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') +
+    ' · ' + days.length + ' jours (' + dShort(days[0]) + ' → ' + dShort(days[days.length - 1]) + ') · ' + perLbl +
+    (prevHas() ? ' · poids : Prévision Webhelp' : ' · poids de prévision absents : répartition uniforme');
+}
+
+/* ---------- vue par créneaux 30 min (poids créneaux de la prévision) ---------- */
+const SLOTS_DEF = (() => { const a = []; for (let t = 450; t <= 1350; t += 30) a.push(t); return a; })();
+function slotWOf(act, prof, mk) {                    // poids des créneaux d'une activité (repli profil hyper du mois)
+  const cre = (D.prev && D.prev.creneaux) || {};
+  const m = mk && cre[mk];
+  const pk = prevKeyOfAct(act);
+  const f = pk && m && m[pk[1]];
+  return (f && (f[prof] || f.ls)) || (m && m.hyper && (m.hyper[prof] || m.hyper.ls)) || null;
+}
+function r1Cre() {
+  const R = D.rm2;
+  const CC = ['c1ca', 'c1cb'];
+  const blank = msg => {
+    $('k1c').innerHTML = '<div class="kpi"><div class="lbl">' + msg + '</div></div>';
+    CC.forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
+    $('t1c').innerHTML = ''; $('h1c').textContent = ''; $('t1cPer').textContent = '—';
+    $('w1CSrc').textContent = 'Vue par créneaux : indisponible';
+  };
+  if (!R || !R.weeks || !R.weeks.length) { blank('Aucun modèle RM — importez le modèle RM (onglet AUCHAN)'); return; }
+  const days = r1jDays('C');
+  if (!days.length) { blank('Aucun jour sur la période — élargissez Année / Mois / Semaine / Personnalisé'); return; }
+  const acts = rmActsSel();
+  const perLbl = gfLbl();
+  if (!acts.length) { blank('Aucune activité dans ce périmètre — ajustez les filtres Flux / Channel / Activités'); return; }
+  const mode = $('w1CV').value;
+  const dSel = $('w1CD').value;
+  const daysUse = mode === 'jour' ? (dSel && days.includes(dSel) ? [dSel] : []) : days;
+  if (!daysUse.length) { blank('Choisissez un jour couvert par la période sélectionnée (ou passez en « Moyenne période »)'); return; }
+  /* univers de créneaux : poids de la prévision (repli 07:30 → 22:30) */
+  const cre = (D.prev && D.prev.creneaux) || {};
+  const tuni = new Set();
+  Object.values(cre).forEach(fl => Object.values(fl).forEach(pr => Object.values(pr).forEach(sl =>
+    Object.keys(sl).forEach(t => { const v = +t; if (isFinite(v)) tuni.add(v); }))));
+  const slotList = (tuni.size ? [...tuni].sort((a, b) => a - b) : SLOTS_DEF.slice());
+  const nS = slotList.length;
+  const profOf = d => jJours(d) === 'dimanche' ? 'dim' : 'ls';
+  const MCA = rmDaily('capa_a'), MCH = rmDaily('capa_hlog'), MPF = rmDaily('pfin'), MBH = rmDaily('bes_hlog');
+  const accA = {}, accH = {}, accP = Array(nS).fill(0), accBH = Array(nS).fill(0);
+  let etpRatioSum = 0, etpRatioN = 0;
+  daysUse.forEach(d => {
+    const di = MCA.dates.indexOf(d); if (di < 0) return;
+    const wi = rmWeekOfDay(d);
+    const prof = profOf(d);
+    let dayH = 0, dayHW = 0;
+    acts.forEach(k => {
+      const ca = (MCA.by[k] || [])[di]; if (ca == null) return;
+      const w = slotWOf(k, prof, mKey(d));
+      const chl = (MCH.by[k] || [])[di];
+      const cpf = (MPF.by[k] || [])[di];
+      const cbh = (MBH.by[k] || [])[di];
+      const wa = accA[k] = accA[k] || Array(nS).fill(0);
+      const wh = accH[k] = accH[k] || Array(nS).fill(0);
+      slotList.forEach((t, si) => {
+        const wt = w ? (w[t] || 0) : 1 / nS;
+        wa[si] += ca * wt;
+        if (chl != null) wh[si] += chl * wt;
+        if (cpf != null) accP[si] += cpf * wt;
+        if (cbh != null) accBH[si] += cbh * wt;
+      });
+      if (chl != null) { dayH += chl; dayHW += chl; }
+    });
+    const EPW = rmAggM('eff_prod', acts), CHW = rmAggM('capa_hlog', acts);
+    if (wi >= 0 && EPW[wi] != null && CHW[wi] > 0) { etpRatioSum += EPW[wi] / CHW[wi]; etpRatioN++; }
+  });
+  const nD = daysUse.length;
+  const divD = a => a.map(v => Math.round(v / nD * 100) / 100);
+  const A = {}; Object.keys(accA).forEach(k => A[k] = divD(accA[k]));
+  const H = divD(Object.keys(accH).reduce((s, k) => s.map((v, i) => v + accH[k][i]), Array(nS).fill(0)));
+  const P = divD(accP), BH = divD(accBH);
+  const etpRatio = etpRatioN ? etpRatioSum / etpRatioN : null;
+  const ETP = etpRatio ? H.map(v => Math.round(v * etpRatio * 100) / 100) : null;
+  const totA = A && Object.keys(A).length ? Object.values(A).reduce((s, a) => s.map((v, i) => v + a[i]), Array(nS).fill(0)) : Array(nS).fill(0);
+  const iMax = totA.indexOf(Math.max(...totA));
+  const sumTot = totA.reduce((a, b) => a + b, 0), sumP = P.reduce((a, b) => a + b, 0), sumH = H.reduce((a, b) => a + b, 0);
+  const lblC = mode === 'jour' ? dShort(daysUse[0]) + ' (' + jJours(daysUse[0]) + ')' : 'moyenne ' + nD + ' jours';
+  $('k1c').innerHTML =
+    kpi('Capa actes (' + (mode === 'jour' ? 'jour' : 'moy. / jour') + ')', fmt(Math.round(sumTot)), lblC + ' · ' + gfLbl()) +
+    (sumTot ? kpi('Pointe actes', fmt(Math.round(totA[iMax])), slotLab(slotList[iMax]) + ' · ' + lblC) : '') +
+    kpi('Capa heures de log', fmt(Math.round(sumH)) + ' h', (mode === 'jour' ? 'jour' : 'moy. / jour') + ' · Σ créneaux') +
+    kpi('Prévision finale', fmt(Math.round(sumP)), 'couverture ' + pctS(sumTot, sumP)) +
+    kpi('ETP à la pointe', ETP ? fmt1(ETP[iMax]) : '—', 'effectif productif ÷ capa h log') +
+    kpi('QE', pc1v(sumP > 0 ? sumTot / sumP : null), 'capa / prévision', sumP > 0 ? Math.min(100, sumTot / sumP * 100) : 0);
+  function pc1v(v) { return v == null ? '—' : (Math.round(v * 1000) / 10) + ' %'; }
+  const lbls = slotList.map(slotLab);
+  const actKeys = Object.keys(A);
+  mkChart('c1ca', { type: 'bar', data: { labels: lbls, datasets: [
+      ...actKeys.map((k, i) => ({ label: k, data: A[k], backgroundColor: PAL[i % PAL.length], stack: 's', borderRadius: 2 })),
+      { label: 'Prévision finale (actes)', data: P.map(v => Math.round(v)), type: 'line', borderColor: '#1b2440',
+        borderWidth: 2, pointRadius: 0, tension: .3 }] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y ?? 0) } } },
+      scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
+                y: { stacked: true, beginAtZero: true, ...axisY('actes / créneau') } } } });
+  mkChart('c1cb', { type: 'bar', data: { labels: lbls, datasets: [
+      { label: 'Capa heures de log', data: H.map(v => Math.round(v * 10) / 10), backgroundColor: '#3b5bdb', borderRadius: 2 },
+      { label: 'Besoin (h)', data: BH.map(v => Math.round(v * 10) / 10), backgroundColor: 'rgba(232,89,12,.55)', borderRadius: 2 },
+      ...(ETP ? [{ label: 'ETP productif', data: ETP, type: 'line', borderColor: '#7048e8', borderWidth: 2, pointRadius: 0, tension: .3, yAxisID: 'y2' }] : [])] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y ?? 0) } } },
+      scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
+                y: { stacked: true, beginAtZero: true, ...axisY('heures / créneau') },
+                y2: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: 'ETP', font: { size: 10.5 } } } } } });
+  let h = '<thead><tr><th>Créneau</th><th>Capa actes</th><th>Prévu (actes)</th><th>QE</th><th>Capa h log</th><th>Besoin (h)</th><th>ETP productif</th></tr></thead><tbody>';
+  slotList.forEach((t, i) => {
+    const q = P[i] > 0 ? totA[i] / P[i] : null;
+    h += `<tr><td>${slotLab(t)}</td><td>${fmt1(totA[i])}</td><td>${fmt1(P[i])}</td>` +
+         `<td>${q == null ? '—' : (Math.round(q * 1000) / 10) + ' %'}</td>` +
+         `<td>${fmt1(H[i])}</td><td>${fmt1(BH[i])}</td><td>${ETP ? fmt1(ETP[i]) : '—'}</td></tr>`;
+  });
+  h += `</tbody><tfoot><tr><td>Σ — ${lblC}</td><td>${fmt1(sumTot)}</td><td>${fmt1(sumP)}</td>` +
+       `<td>${sumP > 0 ? (Math.round(sumTot / sumP * 1000) / 10) + ' %' : '—'}</td>` +
+       `<td>${fmt1(sumH)}</td><td>${fmt1(BH.reduce((a, b) => a + b, 0))}</td>` +
+       `<td>${ETP ? fmt1(Math.max(...ETP)) + ' (max)' : '—'}</td></tr></tfoot>`;
+  $('t1c').innerHTML = h;
+  $('t1cPer').textContent = lblC + ' · ' + gfLbl();
+  $('h1c').textContent = 'Capa par créneau = capa journalière (modèle RM × poids journaliers) × poids du créneau de la prévision Webhelp ' +
+    '(profil « Lundi au samedi » ou « Dimanche » selon le jour ; activités sans profil dédié : repli profil Hyper). ' +
+    'ETP productif = capa heures ÷ (capa heures hebdo ÷ effectif productif hebdo).';
+  $('w1CSrc').textContent = 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') + ' · ' + lblC +
+    ' · ' + nS + ' créneaux 30 min' + (prevHas() && Object.keys(cre).length ? ' · poids créneaux : Prévision Webhelp' : ' · poids créneaux absents : répartition uniforme');
+}
+
 const kpi = (lbl, val, sub, bar) =>
   `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${val}</div><div class="sub">${sub || ''}</div>` +
   (bar != null ? `<div class="bar"><i style="width:${Math.min(100, bar)}%"></i></div>` : '') + '</div>';
 
 /* =====================================================================
-   P2 — CAPACITAIRE (actes & heures, jour / semaine / mois)
+   RÉPARTITION JOURNALIÈRE DE LA CAPA HEBDO DU MODÈLE RM
+   (poids journaliers de la prévision — helpers partagés par les sous-onglets
+   Roadmap journalière / créneaux et l'Analyse capa)
    ===================================================================== */
 function aggBy(dates, g) {                          // -> clés de période + index de regroupement
   const keys = [], idx = [];
-  const kOf = d => g === 'jour' ? d : g === 'semaine' ? wLab(d) : mKey(d);
+  const kOf = d => g === 'jour' ? d : g === 'semaine' ? wLabY(d) : mKey(d);
   dates.forEach(d => { const k = kOf(d); const i = keys.indexOf(k); if (i < 0) { keys.push(k); idx.push(keys.length - 1); } else idx.push(i); });
   return { keys, idx };
 }
-function hrsOf(f, oi) {                             // capacitaire en heures d'un flux : fichier ou conversion
-  if (f.hrs && f.hrs.length && f.hrs[oi]) return { v: f.hrs[oi], conv: false };
-  const p = prodOf(f.a);
-  if (p) return { v: (f.capa[oi] || 0) / p, conv: true };
-  return { v: null, conv: false };
+/* ---------- Capacitaire : capa hebdo du modèle RM répartie par jour ----------
+   Le modèle RM fournit la capa en actes / heures de log / heures de prod par semaine × activité.
+   Répartition journalière : poids de la prévision Webhelp (normalisés sur les jours de CHAQUE semaine,
+   donc Σ = 1 par semaine), repli sur le profil « hyper » du même canal, sinon répartition uniforme. */
+function isoMonday(y, w) {                          // lundi de la semaine ISO (y, w)
+  const f = new Date(Date.UTC(y, 0, 4));            // le 4 janv. est toujours en semaine 1
+  const dn = (f.getUTCDay() + 6) % 7;
+  const m = new Date(f); m.setUTCDate(m.getUTCDate() - dn + (w - 1) * 7);
+  return m.toISOString().slice(0, 10);
+}
+function rmWeekDays(w) {                            // jours couverts par une semaine du modèle RM
+  const s = /^\d{4}-\d{2}-\d{2}$/.test(w.start || '') ? w.start : isoMonday(w.y || +String(w.k || '').slice(-4), w.n);
+  const n = Math.max(1, Math.min(7, w.days || 7));
+  const out = []; for (let i = 0; i < n; i++) out.push(addDays(s, i));
+  return out;
+}
+function rmDays() {                                 // union triée des jours couverts par le modèle RM
+  if (!D.rm2 || !D.rm2.weeks || !D.rm2.weeks.length) return [];
+  const out = new Set();
+  D.rm2.weeks.forEach(w => rmWeekDays(w).forEach(d => out.add(d)));
+  return [...out].sort();
+}
+function prevKeyOfAct(act) {                        // (canal 'a'|'m', clé du poids prévision) ou null
+  const s = norm(act);
+  if (s.includes('mail')) {
+    for (const f of ['hyper', 'afr', 'drive', 'direct']) if (s.includes(f)) return ['m', f];
+    return null;
+  }
+  if (s.includes('chat') || s.includes('borne') || s.includes('lsa')) return null;
+  for (const f of ['hyper', 'c2e', 'afr', 'drive', 'sav', 'direct']) if (s.includes(f)) return ['a', f];
+  return null;
+}
+function rmWeekRawW(d, pk) {                        // poids brut du jour (repli profil hyper du canal)
+  const w = D.prev && D.prev.poidsJour ? D.prev.poidsJour[d] : null;
+  if (!w || !pk) return 0;
+  const x = (w[pk[0]] || {})[pk[1]];
+  if (x > 0) return x;
+  return (w[pk[0]] || {}).hyper > 0 ? w[pk[0]].hyper : 0;
+}
+function rmDaily(sec) {                             // matrice journalière d'une section hebdo du RM
+  const out = { dates: rmDays(), by: {}, any: false };
+  const S = D.rm2 && D.rm2.s ? D.rm2.s[sec] : null;
+  if (!S) return out;
+  const iOf = {}; out.dates.forEach((d, i) => iOf[d] = i);
+  D.rm2.weeks.forEach((w, wi) => {
+    const ds = rmWeekDays(w).filter(d => iOf[d] != null);
+    if (!ds.length) return;
+    Object.keys(S.a).forEach(k => {
+      const v = (S.a[k] || [])[wi];
+      if (v == null) return;
+      if (!out.by[k]) out.by[k] = Array(out.dates.length).fill(null);
+      const pk = prevKeyOfAct(k);
+      const raw = ds.map(d => rmWeekRawW(d, pk));
+      const sW = raw.reduce((x, y) => x + y, 0);
+      ds.forEach((d, j) => {
+        const wj = sW > 0 ? raw[j] / sW : 1 / ds.length;
+        out.by[k][iOf[d]] = v * wj;
+        out.any = true;
+      });
+    });
+  });
+  return out;
+}
+function rmDailySum(M, acts) {                      // somme journalière sur un périmètre d'activités
+  const n = M.dates.length, out = Array(n).fill(0);
+  (acts || Object.keys(M.by)).forEach(k => { const a = M.by[k]; if (!a) return;
+    for (let i = 0; i < n; i++) if (a[i] != null) out[i] += a[i]; });
+  return out;
 }
 function renderProdEd() {                           // hypothèses de productivité (actes / heure)
   const el = $('prodEd'); if (!el) return;
   const set = new Map();
   const add = a => { const k = norm(a); if (k && !set.has(k)) set.set(k, a); };
-  D.capa.flux.forEach(f => add(f.a));
+  if (D.rm2 && D.rm2.acts) D.rm2.acts.forEach(a => add(a.k));
   D.roadmap.forEach(r => add(r.a));
   RFLOW.forEach(f => add(f.charAt(0) + f.slice(1).toLowerCase()));
   D.planH.acts.forEach(add);
   el.innerHTML = set.size ? [...set.entries()].map(([k, nice]) =>
     `<div class="pitem"><label>${nice}</label><input type="number" min="0" step="0.5" data-k="${k}" value="${D.prod.def[k] ?? ''}" placeholder="actes/h"></div>`).join('')
-    : '<span class="hint">Aucune activité connue — importez la Capacitaire ou la Roadmap.</span>';
+    : '<span class="hint">Aucune activité connue — importez le modèle RM ou le Planning heures.</span>';
   el.querySelectorAll('input').forEach(inp => inp.addEventListener('change', () => {
     const v = n2(inp.value);
     if (v > 0) D.prod.def[inp.dataset.k] = v; else delete D.prod.def[inp.dataset.k];
-    D.prod.file = 'hypothèses manuelles'; save(); r2(); if (PAGE === 'p3') r3();
+    D.prod.file = 'hypothèses manuelles'; save(); r3();
   }));
 }
-function r2() {
-  const C = D.capa;
-  if (!C.dates.length) { $('k2').innerHTML = '<div class="kpi"><div class="lbl">Aucune capacitaire</div><div class="sub">Importez le fichier Capacitaire (onglet DAILY VISION).</div></div>'; $('t2').innerHTML = ''; mkChart('c2a', { type: 'bar', data: { labels: [], datasets: [] } }); renderProdEd(); return; }
-  const g = GF.g, u = $('s2U').value;                                     // u : 'a' = actes, 'h' = heures
-  const fluxAll = C.flux.filter(f => gfPass(f.k));
-  if (!fluxAll.length) {
-    $('k2').innerHTML = '<div class="kpi"><div class="lbl">Aucune activité dans ce périmètre</div><div class="sub">Ajustez les filtres Flux / Channel / Activités.</div></div>';
-    $('t2').innerHTML = ''; mkChart('c2a', { type: 'bar', data: { labels: [], datasets: [] } }); return;
-  }
-  const keep = C.dates.map((d, i) => [d, i]).filter(([d]) => inPer('p2', d)).map(([, i]) => i);
-  if (!keep.length) { noPer('p2', 'k2', ['c2a'], 't2'); return; }
-  const fD = keep.map(i => C.dates[i]);
-  const { keys, idx } = aggBy(fD, g);
-  const zero = () => Array(keys.length).fill(0);
-  const flux = fluxAll;
-  const acc = flux.map(() => zero());
-  const tPrev = zero(), tContr = zero();
-  let convUsed = false, hMissing = false, whUsed = false;
-  flux.forEach((f, fi) => {
-    const pk = actKeyOf(f.k).toLowerCase(), pc = f.c === 'Mail' ? 'm' : 'a';
-    keep.forEach((oi, k) => {
-      const d = C.dates[oi];
-      const ca = f.capa[oi] || 0, ct = f.contr[oi] || 0;
-      const wh = whPrevDay(pk, pc, d);                    // répartition journalière pondérée par la prévision
-      let pv; if (wh != null) { pv = wh; whUsed = true; } else pv = f.prev[oi] || 0;
-      if (u === 'a') {
-        acc[fi][idx[k]] += ca; tPrev[idx[k]] += pv; tContr[idx[k]] += ct;
-      } else {
-        const hc = hrsOf(f, oi);
-        if (hc.v != null) { acc[fi][idx[k]] += hc.v; if (hc.conv) convUsed = true; }
-        else if (ca) hMissing = true;
-        const hp = prodOf(f.a);
-        if (f.hrsPrev && f.hrsPrev.length && f.hrsPrev[oi]) tPrev[idx[k]] += f.hrsPrev[oi];
-        else if (hp) tPrev[idx[k]] += pv / hp;
-        if (f.hrsContr && f.hrsContr.length && f.hrsContr[oi]) tContr[idx[k]] += f.hrsContr[oi];
-        else if (hp) tContr[idx[k]] += ct / hp;
-      }
-    });
-  });
-  const capaTot = acc.reduce((a, s) => s.map((v, i) => v + a[i]), zero());
-  const tCapa = capaTot.reduce((a, b) => a + b, 0), P = tPrev.reduce((a, b) => a + b, 0), K = tContr.reduce((a, b) => a + b, 0);
-  const labU = u === 'a' ? 'actes' : 'heures', labO = u === 'a' ? 'heures' : 'actes';
-  /* total dans l'autre unité (info croisée) */
-  let totO = 0, anyO = false, convO = false;
-  flux.forEach(f => keep.forEach(oi => {
-    if (u === 'a') { const hc = hrsOf(f, oi); if (hc.v != null) { totO += hc.v; anyO = true; if (hc.conv) convO = true; } }
-    else { totO += f.capa[oi] || 0; anyO = true; }
-  }));
-  const srcNote = u === 'h' ? (hMissing ? 'heures manquantes : définissez les hypothèses' : (convUsed ? 'heures = actes ÷ hypothèses' : 'heures issues du fichier CAPA'))
-                            : (anyO ? (convO ? 'heures = actes ÷ hypothèses' : 'heures issues du fichier CAPA') : 'hypothèses de productivité à définir');
-  $('k2').innerHTML =
-    kpi('Capacitaire (' + labU + ')', fmt(tCapa), keys[0] + ' → ' + keys[keys.length - 1]) +
-    kpi('Capacitaire (' + labO + ')', anyO && totO ? fmt(Math.round(totO)) : '—', srcNote) +
-    kpi('Prévu total', fmt(Math.round(P)), 'couverture ' + pctS(tCapa, P) +
-        (whUsed ? ' · répartition journalière pondérée par la prévision (poids du mois)' : ' · prévu du fichier capacitaire')) +
-    kpi('Contractuel total', fmt(Math.round(K)), pctS(K, tCapa) + ' de la capacité');
-  mkChart('c2a', { type: 'bar', data: { labels: keys, datasets: [
-      ...acc.map((s, i) => ({ label: flux[i].k, data: s.map(v => Math.round(v * 10) / 10), backgroundColor: PAL[i % PAL.length], stack: 'c', borderRadius: 2 })),
-      { label: 'Prévu', data: tPrev.map(v => Math.round(v * 10) / 10), type: 'line', borderColor: '#1b2440', borderDash: [6, 4], borderWidth: 2, pointRadius: 0, tension: .3 },
-      { label: 'Contractuel', data: tContr.map(v => Math.round(v * 10) / 10), type: 'line', borderColor: '#e8590c', borderWidth: 2, pointRadius: 0, tension: .3 }] },
-    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'bottom' } },
-      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisY(labU) } } });
-  /* tableau */
-  let h = '<thead><tr><th>Période</th><th>Capacitaire (' + labU + ')</th><th>Prévu</th><th>Contractuel</th><th>Capa − Prévu</th><th>Couverture</th></tr></thead><tbody>';
-  keys.forEach((k, i) => {
-    const e = capaTot[i] - tPrev[i];
-    h += `<tr><td>${k}</td><td>${fmt(capaTot[i])}</td><td>${fmt(tPrev[i])}</td><td>${fmt(tContr[i])}</td>` +
-         `<td class="${e < 0 ? 'neg' : 'pos'}">${fmt(e)}</td><td>${pctS(capaTot[i], tPrev[i])}</td></tr>`;
-  });
-  $('t2').innerHTML = h + '</tbody>';
-}
-
 /* =====================================================================
-   P3 — ANALYSE CAPA (PRÉVU VS RÉEL)
-   Capa prévue : fichier Capacitaire (actes, heures si présentes)
-   Capa réelle : Planification (feuille Planning) — heures de log (hors FIM) × (1 − absentéisme RM)
-                 → actes = heures réelles × productivité RM (repli : hypothèses saisies)
-   Réalisé     : traités DRM (voix), fusion de l'ancien onglet « Planifié vs réalisé »
+   P3 — ANALYSE CAPA (capa roadmap vs planif)
+   Capa roadmap : modèle RM (capa en actes / heures de log) répartie par jour
+                  selon les poids de la prévision — cf. rmDaily (onglet Roadmap).
+   Capa planif  : Données DASHBOARD CAPA (feuille Planning + Skills) — heures
+                  planifiées hors FIM × (1 − absentéisme RM) → actes planifiés
+                  = heures de log × productivité (modèle RM, repli : hypothèses saisies).
+   Les jours sans données de planification sont exclus de l'analyse
+   (pas de faux écarts sur l'affichage).
+   ===================================================================== */
+/* =====================================================================
+   P3 — ANALYSE CAPA (capa roadmap vs planif)
+   Capa roadmap : modèle RM (capa en actes / heures de log) réparti par jour
+                  selon les poids de la prévision — cf. rmDaily (onglet Roadmap).
+   Capa planif  : Données DASHBOARD CAPA (feuille Planning + Skills) — heures
+                  planifiées hors FIM × (1 − absentéisme RM) → actes planifiés
+                  = heures de log × productivité (modèle RM, repli : hypothèses saisies).
+   Les jours sans données de planification sont exclus de l'analyse
+   (pas de faux écarts sur l'affichage).
    ===================================================================== */
 function r3() {
-  const C = D.capa, PH = D.planH, PL = D.plan, R = D.real, RM = D.rm2;
-  const hasPlanA = !!(PL && PL.dates && PL.dates.length);          // feuille Planning (agents × créneaux)
-  if (!C.dates.length && !hasPlanA && !PH.dates.length) {
-    $('k3').innerHTML = '<div class="kpi"><div class="lbl">Aucune capacitaire ni planification</div><div class="sub">Importez le fichier Capacitaire (DAILY VISION) et la Planification (feuille Planning).</div></div>';
+  const PL = D.plan, RM = D.rm2;
+  const hasPlanA = !!(PL && PL.dates && PL.dates.length);
+  if (!hasPlanA) {
+    $('k3').innerHTML = '<div class="kpi"><div class="lbl">Aucune planification</div><div class="sub">Importez le fichier « Données DASHBOARD CAPA AUCHAN » (feuilles Planning + Skills) : la capa planif provient des heures planifiées hors FIM.</div></div>';
     $('t3').innerHTML = ''; $('p3Hint').textContent = '';
     mkChart('c3a', { type: 'bar', data: { labels: [], datasets: [] } });
-    mkChart('c3b', { type: 'bar', data: { labels: [], datasets: [] } }); return;
+    mkChart('c3b', { type: 'bar', data: { labels: [], datasets: [] } });
+    $('w3Src').textContent = 'Analyse capa : planification à importer';
+    return;
+  }
+  const MCA = rmDaily('capa_a'), MCH = rmDaily('capa_hlog');
+  if (!MCA.any && !MCH.any) {
+    $('k3').innerHTML = '<div class="kpi"><div class="lbl">Capa absente du modèle RM</div><div class="sub">Importez le modèle RM (capa en actes / heures) — la comparaison porte sur capa roadmap vs capa planif.</div></div>';
+    $('t3').innerHTML = ''; $('p3Hint').textContent = '';
+    mkChart('c3a', { type: 'bar', data: { labels: [], datasets: [] } });
+    mkChart('c3b', { type: 'bar', data: { labels: [], datasets: [] } });
+    return;
   }
   const g = GF.g;
-  const planDays = hasPlanA ? PL.dates : [];
-  const days = [...new Set([...C.dates, ...planDays, ...PH.dates])].filter(d => inPer('p3', d)).sort();
-  if (!days.length) { noPer('p3', 'k3', ['c3a', 'c3b'], 't3'); $('p3Hint').textContent = ''; return; }
-  const kOf = d => g === 'mois' ? mKey(d) : g === 'semaine' ? wLab(d) : d;
+  /* jours analysés = uniquement les jours couverts par la planification */
+  const allDays = PL.dates.filter(d => inPer('p3', d));
+  if (!allDays.length) { noPer('p3', 'k3', ['c3a', 'c3b'], 't3'); $('p3Hint').textContent = ''; return; }
+  const kOf = d => g === 'mois' ? mKey(d) : g === 'semaine' ? wLabY(d) : d;
   const keys = [], idxOf = {};
-  days.forEach(d => { const k = kOf(d); if (!(k in idxOf)) { idxOf[k] = keys.length; keys.push(k); } });
+  allDays.forEach(d => { const k = kOf(d); if (!(k in idxOf)) { idxOf[k] = keys.length; keys.push(k); } });
   const z = () => Array(keys.length).fill(0);
-  const pvA = z(), rlA = z(), pvH = z(), rlH = z(), hpB = z(), reD = z();
-  const noHrs = new Set(), noProd = new Set(), noAbs = new Set();
-  let usedAvg = false;
+  const pvA = z(), plA = z(), pvH = z(), plH = z(), hpB = z();
+  const noAbs = new Set(), noProd = new Set(), noHrs = new Set();
   /* absentéisme & productivité du modèle RM (par semaine) */
   const actsRM = RM ? rmActsSel() : [];
   const absA = RM ? rmAggM('abs', actsRM) : null;
-  const wOf = d => {                                              // index de la semaine RM contenant d
-    if (!RM) return -1;
-    const ws = RM.weeks;
-    for (let i = 0; i < ws.length; i++) { const w = ws[i];
-      if (w.start && w.end && d >= w.start && d <= w.end) return i; }
-    return -1;
-  };
-  const absOf = d => { const i = wOf(d);
+  const absOf = d => { const i = rmWeekOfDay(d);
     return i >= 0 && absA && absA[i] != null ? Math.min(.5, Math.max(0, absA[i])) : null; };
-  const prodRMof = (act, wi) => {                                 // actes/heure : modèle RM puis hypothèse saisie
+  const prodRMof = (act, wi) => {
     const S = RM && RM.s.prod_h, x = S && S.a[act] ? S.a[act][wi] : null;
     return x != null ? x : prodOf(act);
   };
-  const avgProd = wi => {                                         // productivité moyenne (totaux RM pondérés pfin)
-    const S = RM && RM.s.prod_h;
-    if (S && actsRM.length) { let s = 0, w = 0;
-      actsRM.forEach(k => { const x = S.a[k] ? S.a[k][wi] : null;
-        const wt = ((RM.s.pfin && RM.s.pfin.a[k]) || [])[wi] || 0;
-        if (x != null && wt > 0) { s += x * wt; w += wt; } });
-      if (w > 0) return s / w; }
-    const cands = (actsRM.length ? actsRM : PH.acts).map(a => prodOf(a)).filter(v => v > 0);
-    return cands.length ? cands.reduce((x, y) => x + y, 0) / cands.length : null;
-  };
-  /* capa prévue (actes + heures) — périmètre des filtres globaux */
-  C.flux.forEach(f => {
-    if (!gfPass(f.k)) return;
-    C.dates.forEach((d, di) => {
-      const k = idxOf[kOf(d)]; if (k == null) return;
-      const ca = f.capa[di] || 0;
-      pvA[k] += ca;
-      const hc = hrsOf(f, di);
-      if (hc.v != null) { pvH[k] += hc.v; if (hc.conv) noHrs.add(f.a); }
+  /* capa roadmap — même périmètre de jours que la planification (comparaison fidèle) */
+  Object.keys(MCA.by).filter(k => gfPass(k)).forEach(k => {
+    allDays.forEach(d => {
+      const di = MCA.dates.indexOf(d); if (di < 0) return;
+      const ca = MCA.by[k][di];
+      if (ca == null) return;
+      const k2 = idxOf[kOf(d)];
+      pvA[k2] += ca;
+      const hv = MCH.by[k] ? MCH.by[k][di] : null;
+      if (hv != null) pvH[k2] += hv;
       else {
-        const pr = prodRMof(f.a, wOf(d));
-        if (pr) { pvH[k] += ca / pr; noHrs.add(f.a); }      // productivité du modèle RM
-        else if (ca) noHrs.add(f.a);
+        const pr = prodRMof(k, rmWeekOfDay(d));
+        if (pr) { pvH[k2] += ca / pr; noHrs.add(k); }
+        else if (ca) noHrs.add(k);
       }
     });
   });
-  /* capa réelle — Planification : heures de log (hors FIM) × (1 − absentéisme RM) → actes × productivité RM */
-  planDays.forEach(d => {
-    const k = idxOf[kOf(d)]; if (k == null) return;
-    const D8 = PL.day[d]; if (!D8) return;
-    const hp = D8.hprod || 0; if (!hp) return;                    // heures planifiées hors FIM (feuille Planning)
+  /* capa planif — répartition skills par activité × canal */
+  const combos = (PL.acts || []).filter(k => {
+    const i = k.indexOf('|'); return gfPass(k.slice(0, i), k.slice(i + 1)); });
+  allDays.forEach(d => {
+    const k2 = idxOf[kOf(d)];
+    const BA = PL.byAct && PL.byAct[d];
+    if (k2 == null || !BA) return;
     const ab = absOf(d);
     if (ab == null) noAbs.add(d);
-    const hlog = hp * (ab != null ? 1 - ab : 1);
-    rlH[k] += hlog; hpB[k] += hp;
-    const wi = wOf(d);
-    let split = null, tot = 0;                                    // répartition par activité via Planning heures
-    if (PH.dates.length) { const di = PH.dates.indexOf(d);
-      if (di >= 0) { split = PH.acts.map(a => ({ a, h: (PH.f[a] || [])[di] || 0 }))
-        .filter(x => gfPass(x.a) && x.h > 0);
-        tot = split.reduce((s, x) => s + x.h, 0); } }
-    if (split && tot > 0) split.forEach(x => { const pr = prodRMof(x.a, wi);
-      if (pr == null) noProd.add(x.a); else rlA[k] += hlog * (x.h / tot) * pr; });
-    else { const pr = avgProd(wi); usedAvg = true;
-      if (pr == null) noProd.add('productivité'); else rlA[k] += hlog * pr; }
-  });
-  const hasPlan = planDays.length > 0;
-  /* réalisé (DRM voix) */
-  R.dates.forEach((d, di) => {
-    const k = idxOf[kOf(d)]; if (k == null) return;
-    RFLOW.forEach(f => {
-      if (!gfPass(f, 'PHONE')) return;
-      reD[k] += R.f[f].t[di] || 0;
+    const fAbs = ab != null ? 1 - ab : 1;
+    let hpTot = 0;
+    combos.forEach(k => { hpTot += BA[k] || 0; });
+    hpB[k2] += hpTot;
+    const hlog = hpTot * fAbs;
+    plH[k2] += hlog;
+    const wi = rmWeekOfDay(d);
+    combos.forEach(k => {
+      const h = BA[k] || 0; if (!h) return;
+      const pr = prodRMof(k.split('|')[0], wi);
+      if (pr == null) noProd.add(k.split('|')[0]);
+      else plA[k2] += h * fAbs * pr;
     });
   });
   const rd = a => a.map(v => Math.round(v));
-  const TP = pvA.reduce((a, b) => a + b, 0), TRl = rlA.reduce((a, b) => a + b, 0);
-  const TH = pvH.reduce((a, b) => a + b, 0), RH = rlH.reduce((a, b) => a + b, 0), RD = reD.reduce((a, b) => a + b, 0);
+  const TP = pvA.reduce((a, b) => a + b, 0), TL = plA.reduce((a, b) => a + b, 0);
+  const TH = pvH.reduce((a, b) => a + b, 0), LH = plH.reduce((a, b) => a + b, 0);
+  const HB = hpB.reduce((a, b) => a + b, 0);
   $('k3').innerHTML =
-    kpi('Capa prévue (actes)', fmt(TP), g + ' · ' + gfLbl()) +
-    (hasPlan ? kpi('Capa réel (actes)', fmt(TRl), 'heures de log × productivité' + (noProd.size ? ' · manquante : ' + [...noProd].join(', ') : ''), TP ? Math.min(100, Math.abs(TRl - TP) / TP * 100) : 0)
-             : kpi('Planification non importée', '—', 'feuille Planning requise pour le réel')) +
-    kpi('Écart capa (réel − prévu)', hasPlan ? fmt(TRl - TP) : '—', hasPlan ? (TRl - TP >= 0 ? 'sur-capacité' : 'sous-capacité') : 'nécessite la planification', TP && hasPlan ? Math.min(100, Math.abs(TRl - TP) / TP * 100) : 0) +
-    kpi('Heures — prévu / réel', fmt(TH) + ' / ' + (hasPlan ? fmt(RH) : '—'),
-        hasPlan ? pctS(RH, TH) + ' des heures prévues · planifié hors FIM ' + fmt(Math.round(hpB.reduce((a, b) => a + b, 0))) + ' h' +
-          (noAbs.size ? ' · absentéisme RM indisponible (' + noAbs.size + ' j)' : '') : 'réel = planifié hors FIM × (1 − absentéisme)') +
-    kpi('Réalisé (DRM)', fmt(RD), hasPlan && TRl ? pctS(RD, TRl) + ' de la capa réelle' : 'traités de la période');
+    kpi('Capa roadmap (actes)', fmt(Math.round(TP)), g + ' · ' + gfLbl() + ' · ' + allDays.length + ' j avec planif') +
+    kpi('Capa planif (actes)', fmt(Math.round(TL)), 'heures de log × productivité' +
+        (noProd.size ? ' · manquante : ' + [...noProd].join(', ') : ''), TP ? Math.min(100, Math.abs(TL - TP) / TP * 100) : 0) +
+    kpi('Écart (planif − roadmap)', fmt(Math.round(TL - TP)), TL - TP >= 0 ? 'sur-capacité' : 'sous-capacité',
+        TP ? Math.min(100, Math.abs(TL - TP) / TP * 100) : 0) +
+    kpi('Heures — roadmap / planif', fmt(Math.round(TH)) + ' / ' + fmt(Math.round(LH)),
+        pctS(LH, TH) + ' des heures roadmap · planifié hors FIM ' + fmt(Math.round(HB)) + ' h' +
+        (noAbs.size ? ' · absentéisme RM indisponible (' + noAbs.size + ' j)' : ''));
   mkChart('c3a', { type: 'bar', data: { labels: keys, datasets: [
-      { label: 'Capa prévue (actes)', data: rd(pvA), backgroundColor: '#3b5bdb', borderRadius: 3 },
-      ...(hasPlan ? [{ label: 'Capa réel (actes)', data: rd(rlA), backgroundColor: '#f59f00', borderRadius: 3 }] : []),
-      { label: 'Réalisé (DRM)', data: rd(reD), type: 'line', borderColor: '#0ca678', borderWidth: 2, pointRadius: 1.5, tension: .3 }] },
+      { label: 'Capa roadmap (actes)', data: rd(pvA), backgroundColor: '#3b5bdb', borderRadius: 3 },
+      { label: 'Capa planif (actes)', data: rd(plA), backgroundColor: '#f59f00', borderRadius: 3 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'bottom' } },
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt(c.parsed.y ?? 0) } } },
       scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisY('actes') } } });
   mkChart('c3b', { type: 'bar', data: { labels: keys, datasets: [
-      { label: 'Heures prévues', data: pvH.map(v => Math.round(v * 10) / 10), backgroundColor: '#7048e8', borderRadius: 3 },
-      ...(hasPlan ? [
-        { label: 'Heures réelles (log × (1 − abs))', data: rlH.map(v => Math.round(v * 10) / 10), backgroundColor: '#1098ad', borderRadius: 3 },
-        { label: 'Planifié hors FIM (brut)', data: hpB.map(v => Math.round(v * 10) / 10), type: 'line', borderColor: '#868e96', borderWidth: 2, pointRadius: 1.5, tension: .3, borderDash: [5, 3] }] : [])] },
+      { label: 'Capa roadmap (heures de log)', data: pvH.map(v => Math.round(v * 10) / 10), backgroundColor: '#7048e8', borderRadius: 3 },
+      { label: 'Capa planif (h log × (1 − abs))', data: plH.map(v => Math.round(v * 10) / 10), backgroundColor: '#1098ad', borderRadius: 3 },
+      { label: 'Planifié hors FIM (brut)', data: hpB.map(v => Math.round(v * 10) / 10), type: 'line', borderColor: '#868e96',
+        borderWidth: 2, pointRadius: 1.5, tension: .3, borderDash: [5, 3] }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' } },
       scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisY('heures') } } });
-  let h = '<thead><tr><th>Période</th><th>Prévu (actes)</th><th>Réel (actes)</th><th>Écart actes</th><th>Prévu (h)</th><th>Réel (h)</th><th>Planifié hors FIM (h)</th><th>Écart h</th><th>Réalisé (DRM)</th><th>Réalisé / réel</th></tr></thead><tbody>';
+  let h = '<thead><tr><th>Période</th><th>Capa roadmap (actes)</th><th>Capa planif (actes)</th><th>Écart actes</th><th>Couverture</th>' +
+    '<th>Capa roadmap (h)</th><th>Capa planif (h)</th><th>Planifié hors FIM (h)</th><th>Écart h</th></tr></thead><tbody>';
   keys.forEach((k, i) => {
-    const eA = rlA[i] - pvA[i], eH = rlH[i] - pvH[i];
-    h += `<tr><td>${k}</td><td>${fmt(pvA[i])}</td><td>${fmt(rlA[i])}</td>` +
-         `<td class="${eA < 0 ? 'neg' : 'pos'}">${fmt(eA)}</td>` +
-         `<td>${fmt(pvH[i])}</td><td>${fmt(Math.round(rlH[i]))}</td><td>${fmt(Math.round(hpB[i]))}</td>` +
-         `<td class="${eH < 0 ? 'neg' : 'pos'}">${fmt(Math.round(eH))}</td>` +
-         `<td>${fmt(reD[i])}</td><td>${pctS(reD[i], rlA[i])}</td></tr>`;
+    const eA = plA[i] - pvA[i], eH = plH[i] - pvH[i];
+    h += `<tr><td>${k}</td><td>${fmt(pvA[i])}</td><td>${fmt(plA[i])}</td>` +
+         `<td class="${eA < 0 ? 'neg' : 'pos'}">${fmt(eA)}</td><td>${pctS(plA[i], pvA[i])}</td>` +
+         `<td>${fmt(pvH[i])}</td><td>${fmt(Math.round(plH[i]))}</td><td>${fmt(Math.round(hpB[i]))}</td>` +
+         `<td class="${eH < 0 ? 'neg' : 'pos'}">${fmt(Math.round(eH))}</td></tr>`;
   });
-  h += `</tbody><tfoot><tr><td>Total période</td><td>${fmt(TP)}</td><td>${fmt(TRl)}</td>` +
-       `<td class="${TRl - TP < 0 ? 'neg' : 'pos'}">${fmt(TRl - TP)}</td>` +
-       `<td>${fmt(TH)}</td><td>${fmt(Math.round(RH))}</td><td>${fmt(Math.round(hpB.reduce((a, b) => a + b, 0)))}</td>` +
-       `<td class="${RH - TH < 0 ? 'neg' : 'pos'}">${fmt(Math.round(RH - TH))}</td>` +
-       `<td>${fmt(RD)}</td><td>${pctS(RD, TRl)}</td></tr></tfoot>`;
+  h += `</tbody><tfoot><tr><td>Total période</td><td>${fmt(Math.round(TP))}</td><td>${fmt(Math.round(TL))}</td>` +
+       `<td class="${TL - TP < 0 ? 'neg' : 'pos'}">${fmt(Math.round(TL - TP))}</td><td>${pctS(TL, TP)}</td>` +
+       `<td>${fmt(Math.round(TH))}</td><td>${fmt(Math.round(LH))}</td><td>${fmt(Math.round(HB))}</td>` +
+       `<td class="${LH - TH < 0 ? 'neg' : 'pos'}">${fmt(Math.round(LH - TH))}</td></tr></tfoot>`;
   $('t3').innerHTML = h;
   const notes = [];
-  if (!hasPlan) notes.push('Importez la Planification (feuille Planning) pour afficher la capa réelle : heures de log (hors FIM) × (1 − absentéisme du modèle RM).');
-  if (noAbs.size && hasPlan) notes.push('Absentéisme du modèle RM indisponible pour ' + noAbs.size + ' jour(s) — déduction non appliquée sur ces jours.');
-  if (noProd.size && hasPlan) notes.push('Productivité manquante : ' + [...noProd].join(', ') + ' — renseignez le modèle RM (section Productivité) ou les hypothèses de l\'onglet Capacitaire.');
-  if (hasPlan && usedAvg && !noProd.size) notes.push('Actes réels = heures de log × productivité moyenne pondérée du modèle RM (activités retenues par les filtres) ; la répartition par activité est affinée si le « Planning heures » est importé.');
-  if (noHrs.size) notes.push('Heures prévues converties via la productivité (aucune ligne « Capacitaire en heures » dans le fichier CAPA).');
+  notes.push('Seuls les jours couverts par la planification sont analysés (' + allDays.length + ' j' +
+    (g !== 'jour' ? ' · granularité ' + g : '') + ') — les jours sans planif sont exclus pour ne pas fausser les écarts.');
+  notes.push('Capa roadmap = capa hebdomadaire du modèle RM répartie par jour selon les poids de la prévision (cf. onglet Roadmap).');
+  notes.push('Capa planif = heures planifiées hors FIM (feuille Planning, réparties par activité × canal selon la feuille Skills) × (1 − absentéisme RM) ; actes = heures de log × productivité.');
+  if (noAbs.size) notes.push('Absentéisme du modèle RM indisponible pour ' + noAbs.size + ' jour(s) — déduction non appliquée sur ces jours.');
+  if (noProd.size) notes.push('Productivité manquante : ' + [...noProd].join(', ') + ' — renseignez le modèle RM (section Productivité) ou les hypothèses ci-dessous.');
+  if (noHrs.size) notes.push('Heures roadmap converties via la productivité (section « capa en heures de log » absente pour : ' + [...noHrs].join(', ') + ').');
   $('p3Hint').textContent = notes.join(' ');
+  $('w3Src').textContent = 'Capa roadmap : modèle RM (' + (D.meta.rm2 || (RM && RM.meta && RM.meta.file) || 'RM') + ') × poids de la prévision · Capa planif : ' +
+    ((PL.meta && PL.meta.file) || 'planification') + ' (' + allDays.length + ' j)';
+  renderProdEd();
 }
 
 /* =====================================================================
-   P8 — PLANIFICATION (feuille Planning : personnes par jour & créneaux 30 min)
-   Personnes planifiées en prod = présence [Shift In, Shift Out) − pause repas,
-   hors FIM (hors prod) — cf. impPlanning / planAgg. Heures de log = HP − Total FIM.
+   P8 — PLANIFICATION (2 sous-onglets : journalière · créneaux 30 min)
+   Heures planifiées réparties par activité × canal selon la feuille Skills
+   (HYPER/DRIVE 50/50 × MAIL/PHONE · ALL toutes activités et canaux ·
+   SAV mono PHONE · CHAT mono CHAT) — cf. buildPlanExtras. Hors FIM.
+   Personnes planifiées en prod = présence [Shift In, Shift Out) − pause repas.
    ===================================================================== */
+function planEmpty() { return !D.plan || !D.plan.dates || !D.plan.dates.length; }
+const P8V = { view: 'jour' };
 function planEmpty() { return !D.plan || !D.plan.dates || !D.plan.dates.length; }
 function defSlotDay8() {                            // jour par défaut : le plus chargé
   const P = D.plan; if (!P || !P.dates || !P.dates.length) return;
@@ -1882,18 +2121,37 @@ function defSlotDay8() {                            // jour par défaut : le plu
   $('w8D').value = best;
   $('w8D').min = P.dates[0]; $('w8D').max = P.dates[P.dates.length - 1];
 }
+function planCombos() {                             // combos activité|canal retenus par les filtres globaux
+  const P = D.plan; if (!P || !P.acts) return [];
+  return P.acts.filter(k => {
+    const i = k.indexOf('|');
+    return gfPass(k.slice(0, i), k.slice(i + 1));
+  });
+}
 function r8() {
   const has = !planEmpty();
-  $('p8body').style.display = has ? '' : 'none';
+  $('p8vJour').style.display = has && P8V.view === 'jour' ? '' : 'none';
+  $('p8vCre').style.display = has && P8V.view === 'cre' ? '' : 'none';
   $('p8empty').style.display = has ? 'none' : '';
-  if (!has) { $('w8Src').textContent = 'Feuille Planning : à importer'; return; }
+  $('p8fJour').style.display = P8V.view === 'jour' ? '' : 'none';
+  $('p8fCre').style.display = P8V.view === 'cre' ? '' : 'none';
+  if (!has) {
+    $('w8JSrc').textContent = 'Planification : à importer (fichier « Données DASHBOARD CAPA AUCHAN », feuilles Planning + Skills)';
+    $('w8Src').textContent = '';
+    return;
+  }
+  if (P8V.view === 'cre') r8Cre(); else r8Jour();
+}
+
+/* ---------- vue journalière ---------- */
+function r8Jour() {
   const P = D.plan;
   const days = P.dates.filter(d => inPer('p8', d));
-  defSlotDay8();
-  if (!days.length) { noPer('p8', 'k8', ['c8a', 'c8b', 'c8c'], 't8'); $('t8m').innerHTML = ''; $('h8').textContent = '';
-    $('w8Src').textContent = 'Planification : aucun jour sur ' + rangeLbl(...perRange()); return; }
-  const slots = P.slots;
+  if (!days.length) { noPer('p8', 'k8', ['c8a', 'c8b'], 't8'); $('h8').textContent = '';
+    $('w8JSrc').textContent = 'Planification : aucun jour sur ' + rangeLbl(...perRange()); return; }
   const g = GF.g;
+  const combos = planCombos();
+  const actsU = [...new Set(combos.map(k => k.split('|')[0]))].filter(a => gfPass(a));
   /* KPIs de la période */
   const ags = new Set();
   days.forEach(d => (P.day[d].ag || []).forEach(a => ags.add(a)));
@@ -1903,36 +2161,132 @@ function r8() {
   const HPD = days.reduce((s, d) => s + P.day[d].hprod, 0);
   const FM = days.reduce((s, d) => s + P.day[d].fimh, 0);
   const RP = days.reduce((s, d) => s + P.day[d].repas, 0);
-  /* vue par créneau : moyenne période ou jour précis */
-  const v8 = $('w8V').value, d8 = $('w8D').value, jourPrecis = v8 === 'jour' && P.m.prod[d8];
-  const vec = jourPrecis ? P.m.prod[d8].slice() : slots.map((_, i) => days.reduce((s, d) => s + (P.m.prod[d][i] || 0), 0) / days.length);
-  const fimV = jourPrecis ? (P.m.fim[d8] || []).slice() : slots.map((_, i) => days.reduce((s, d) => s + (P.m.fim[d][i] || 0), 0) / days.length);
-  const iP = vec.indexOf(Math.max(...vec));
+  /* heures de log réalisées (EXT_Agent) */
+  const L = D.logR;
+  const logOf = d => { if (!L || !L.dates) return null; const i = L.dates.indexOf(d); return i >= 0 ? L.h.tot[i] : null; };
+  const LOG = days.map(logOf);
+  const logAny = LOG.some(v => v != null && v > 0);
+  const logTot = LOG.reduce((s, v) => s + (v || 0), 0);
+  /* heures réparties par activité */
+  const hBy = {};
+  actsU.forEach(a => hBy[a] = days.map(() => 0));
+  days.forEach((d, i) => {
+    const BA = (P.byAct || {})[d] || {};
+    combos.forEach(k => { const a = k.split('|')[0]; if (hBy[a]) hBy[a][i] += BA[k] || 0; });
+  });
+  const sumRep = days.map((_, i) => actsU.reduce((s, a) => s + hBy[a][i], 0));
+  const iMax = HPD ? sumRep.indexOf(Math.max(...sumRep)) : 0;
+  const domA = actsU.length ? actsU.reduce((b, a) => hBy[a][iMax] > hBy[b][iMax] ? a : b, actsU[0]) : '—';
   $('k8').innerHTML =
     kpi('Agents planifiés', fmt(ags.size), days.length + ' jour(s) sur la période') +
     kpi('Personnes planifiées / jour', fmt1(totPlan / days.length), 'dont FIM hors prod ' + fmt1(totFimN / days.length) + ' / j') +
     kpi('Heures planifiées (HP)', fmt(Math.round(HP)) + ' h', 'hors pause repas ' + fmt(Math.round(RP)) + ' h') +
-    kpi('Heures de log', fmt(Math.round(HPD)) + ' h', 'hors FIM ' + fmt(Math.round(FM)) + ' h') +
-    kpi('Pointe ' + (jourPrecis ? dShort(d8) : 'moyenne période'), fmt1(vec[iP]), slots[iP] + ' · personnes en prod');
-  /* graphique 1 : personnes par jour (granularité globale) */
+    kpi('Heures de log (hors FIM)', fmt(Math.round(HPD)) + ' h', 'réparties sur ' + actsU.length + ' activité(s)') +
+    (logAny ? kpi('Heures de log réalisées', fmt(Math.round(logTot)) + ' h', 'EXT_Agent — Busy · Wrap Up · Hold · Chat · Panier') : '') +
+    (HPD ? kpi('Activité dominante', domA, dShort(days[iMax]) + ' · ' + fmt1(hBy[domA] ? hBy[domA][iMax] : 0) + ' h') : '');
+  /* graphique 1 : heures par activité (canaux fusionnés) + HP + log réalisé */
   const { keys, idx } = aggBy(days, g);
-  const cnt = Array(keys.length).fill(0);
-  const prodB = keys.map(() => 0), fimB = keys.map(() => 0), hpdB = keys.map(() => 0);
-  days.forEach((d, j) => { const k = idx[j]; cnt[k]++;
-    prodB[k] += P.day[d].plan - P.day[d].fim; fimB[k] += P.day[d].fim; hpdB[k] += P.day[d].hprod; });
-  const avgArr = a => a.map((v, i) => cnt[i] ? v / cnt[i] : 0);
+  const gN = keys.length, cnt = Array(gN).fill(0);
+  days.forEach((d, j) => cnt[idx[j]]++);
   const isAvg = g !== 'jour';
+  const div = a => a.map((v, i) => cnt[i] ? (isAvg ? v / cnt[i] : v) : v);
+  const hByG = actsU.map(a => div(hBy[a].reduce((acc, v, j) => (acc[idx[j]] += v, acc), Array(gN).fill(0))));
+  const hpG = div(days.reduce((acc, d, j) => (acc[idx[j]] += P.day[d].hp, acc), Array(gN).fill(0)));
+  const repG = div(sumRep.reduce((acc, v, j) => (acc[idx[j]] += v, acc), Array(gN).fill(0)));
+  const logG = L && L.dates ? div(days.reduce((acc, d, j) => {
+    const i = L.dates.indexOf(d); if (i >= 0) acc[idx[j]] += L.h.tot[i] || 0; return acc; }, Array(gN).fill(0))) : null;
   mkChart('c8a', { type: 'bar', data: { labels: keys, datasets: [
+      ...hByG.map((a, i) => ({ label: actsU[i], data: a.map(v => Math.round(v * 10) / 10),
+        backgroundColor: PAL[i % PAL.length], stack: 's', borderRadius: 2 })),
+      { label: 'HP (planifiées)', data: hpG.map(v => Math.round(v)), type: 'line', borderColor: '#1b2440',
+        borderWidth: 2, pointRadius: 1.5, tension: .3 },
+      ...(logAny ? [{ label: 'Heures de log réalisées', data: logG.map(v => Math.round(v)), type: 'line',
+        borderColor: '#0ca678', borderWidth: 2, pointRadius: 1.5, tension: .3, borderDash: [5, 3] }] : [])] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y ?? 0) + ' h' } } },
+      scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
+                y: { stacked: true, beginAtZero: true, ...axisY('heures / ' + (isAvg ? 'jour (moy.)' : 'jour')) } } } });
+  /* graphique 2 : personnes par jour (prod + FIM) */
+  const prodB = keys.map(() => 0), fimB = keys.map(() => 0);
+  days.forEach((d, j) => { prodB[idx[j]] += P.day[d].plan - P.day[d].fim; fimB[idx[j]] += P.day[d].fim; });
+  const avgArr = a => a.map((v, i) => cnt[i] ? v / cnt[i] : 0);
+  mkChart('c8b', { type: 'bar', data: { labels: keys, datasets: [
       { label: isAvg ? 'Planifiés prod (moy. / jour)' : 'Planifiés prod', data: avgArr(prodB).map(v => Math.round(v * 10) / 10), backgroundColor: '#3b5bdb', stack: 's', borderRadius: 2 },
-      { label: isAvg ? 'FIM hors prod (moy. / jour)' : 'FIM hors prod', data: avgArr(fimB).map(v => Math.round(v * 10) / 10), backgroundColor: '#adb5bd', stack: 's', borderRadius: 2 },
-      { label: 'Heures de log', data: hpdB.map(v => Math.round(v)), type: 'line', borderColor: '#f59f00', borderWidth: 2, pointRadius: 2, tension: .3, yAxisID: 'y2' }] },
+      { label: isAvg ? 'FIM hors prod (moy. / jour)' : 'FIM hors prod', data: avgArr(fimB).map(v => Math.round(v * 10) / 10), backgroundColor: '#adb5bd', stack: 's', borderRadius: 2 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' } },
       scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
-        y: { stacked: true, beginAtZero: true, grid: GRID, title: { display: true, text: 'personnes', font: { size: 10.5 } } },
-        y2: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: 'heures', font: { size: 10.5 } } } } } });
-  /* graphique 2 : personnes par créneau 30 min */
-  mkChart('c8b', { type: 'bar', data: { labels: slots, datasets: [
+                y: { stacked: true, beginAtZero: true, ...axisY('personnes') } } } });
+  /* tableau détail par jour */
+  let h = '<thead><tr><th>Date</th><th>Jour</th><th>Planifiés</th><th>dont FIM</th><th>HP (h)</th>' +
+    actsU.map(a => `<th>${a} (h)</th>`).join('') + '<th>Σ réparti (h)</th>' +
+    (logAny ? '<th>Log réalisé (h)</th>' : '') + '<th>FIM (h)</th></tr></thead><tbody>';
+  days.forEach((d, i) => {
+    const D8 = P.day[d];
+    h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td><td>${D8.plan}</td><td>${D8.fim}</td><td>${fmt1(D8.hp)}</td>` +
+      actsU.map(a => `<td>${hBy[a][i] ? fmt1(hBy[a][i]) : '·'}</td>`).join('') +
+      `<td><b>${fmt1(sumRep[i])}</b></td>` +
+      (logAny ? `<td>${LOG[i] != null ? fmt1(LOG[i]) : '—'}</td>` : '') +
+      `<td>${fmt1(D8.fimh)}</td></tr>`;
+  });
+  h += `</tbody><tfoot><tr><td colspan="2">Total période · moy. / jour</td><td>${fmt1(totPlan / days.length)} / j</td>` +
+       `<td>${fmt1(totFimN / days.length)} / j</td><td>${fmt(Math.round(HP))}</td>` +
+       actsU.map(a => `<td>${fmt(Math.round(hBy[a].reduce((x, y) => x + y, 0)))}</td>`).join('') +
+       `<td>${fmt(Math.round(sumRep.reduce((x, y) => x + y, 0)))}</td>` +
+       (logAny ? `<td>${fmt(Math.round(logTot))}</td>` : '') +
+       `<td>${fmt(Math.round(FM))}</td></tr></tfoot>`;
+  $('t8').innerHTML = h;
+  $('h8').textContent = 'Répartition selon la feuille Skills : HYPER/DRIVE → 50/50 sur Hyper et Drive × 50/50 sur MAIL et PHONE · ' +
+    'ALL → toutes les activités et canaux (uniforme) · SAV → PHONE uniquement · CHAT → CHAT uniquement · FIM hors prod (exclu). ' +
+    'Heures = présence [Shift In, Shift Out) − pause repas · Heures de log réalisées = EXT_Agent (Busy, Wrap Up, Hold, Chat, Panier), hors agents FIM.';
+  $('w8JSrc').textContent = 'Planification : ' + ((P.meta && P.meta.file) || 'importée') + ' · ' + days.length + ' j · ' +
+    (D.skills && D.skills.by ? Object.keys(D.skills.by).filter(k => k.startsWith('wd:')).length + ' compétences' : 'compétences : lots du Planning') +
+    ' · ' + gfLbl();
+}
+
+/* ---------- vue par créneaux 30 min ---------- */
+function r8Cre() {
+  const P = D.plan;
+  const days = P.dates.filter(d => inPer('p8', d));
+  defSlotDay8();
+  if (!days.length) { noPer('p8', 'k8c', ['c8c', 'c8d'], 't8m'); $('t8p').innerHTML = '';
+    $('w8Src').textContent = 'Planification : aucun jour sur ' + rangeLbl(...perRange()); return; }
+  const slots = P.slots;
+  const combos = planCombos();
+  const actsU = [...new Set(combos.map(k => k.split('|')[0]))].filter(a => gfPass(a));
+  const v8 = $('w8V').value, d8 = $('w8D').value;
+  const jourPrecis = v8 === 'jour' && P.m.prod[d8];
+  const daysUse = jourPrecis ? [d8] : days;
+  const nD = daysUse.length;
+  /* personnes par créneau (prod / FIM) */
+  const vec = jourPrecis ? P.m.prod[d8].slice() : slots.map((_, i) => days.reduce((s, d) => s + (P.m.prod[d][i] || 0), 0) / days.length);
+  const fimV = jourPrecis ? (P.m.fim[d8] || []).slice() : slots.map((_, i) => days.reduce((s, d) => s + (P.m.fim[d][i] || 0), 0) / days.length);
+  const iP = vec.indexOf(Math.max(...vec));
+  /* heures par activité par créneau */
+  const hS = {};
+  actsU.forEach(a => hS[a] = slots.map(() => 0));
+  daysUse.forEach(d => {
+    const BS = (P.byActSlot || {})[d] || {};
+    combos.forEach(k => {
+      const a = k.split('|')[0], arr = BS[k];
+      if (!arr || !hS[a]) return;
+      arr.forEach((v, si) => hS[a][si] += v);
+    });
+  });
+  if (!jourPrecis) actsU.forEach(a => hS[a] = hS[a].map(v => v / nD));
+  const totS = slots.map((_, i) => actsU.reduce((s, a) => s + hS[a][i], 0));
+  const totH = totS.reduce((a, b) => a + b, 0);
+  const iHS = totS.indexOf(Math.max(...totS));
+  const domC = actsU.length ? actsU.reduce((b, a) => hS[a][iHS] > hS[b][iHS] ? a : b, actsU[0]) : '—';
+  const lblC = jourPrecis ? dShort(d8) + ' (' + jJours(d8) + ')' : 'moyenne période';
+  $('k8c').innerHTML =
+    kpi('Pointe personnes en prod', fmt1(vec[iP]), slots[iP] + ' · ' + lblC) +
+    kpi('FIM hors prod à la pointe', fmt1(fimV[iP]), slots[iP]) +
+    kpi('Heures / créneau', fmt1(totS[iHS]) + ' h', 'pointe à ' + slots[iHS] + ' · ' + lblC) +
+    kpi('Activité dominante (pointe h)', domC, fmt1(hS[domC] ? hS[domC][iHS] : 0) + ' h à ' + slots[iHS]) +
+    kpi('Σ heures ' + lblC.toLowerCase(), fmt(Math.round(totH)) + ' h', (jourPrecis ? 'jour précis' : 'moy. / jour') + ' · ' + actsU.length + ' activité(s)');
+  mkChart('c8c', { type: 'bar', data: { labels: slots, datasets: [
       { label: 'Planifiés prod', data: vec.map(v => Math.round(v * 10) / 10), backgroundColor: '#3b5bdb', borderRadius: 2 },
       { label: 'FIM hors prod', data: fimV.map(v => Math.round(v * 10) / 10), backgroundColor: '#adb5bd', borderRadius: 2 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
@@ -1940,310 +2294,69 @@ function r8() {
         tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y) } } },
       scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
                 y: { stacked: true, beginAtZero: true, ...axisY('personnes / créneau') } } } });
-  /* graphique 3 : heures par jour — log / FIM + HP */
-  mkChart('c8c', { type: 'bar', data: { labels: days.map(dShort), datasets: [
-      { label: 'Heures de log', data: days.map(d => P.day[d].hprod), backgroundColor: '#0ca678', stack: 's', borderRadius: 2 },
-      { label: 'FIM (hors prod)', data: days.map(d => P.day[d].fimh), backgroundColor: '#f59f00', stack: 's', borderRadius: 2 },
-      { label: 'HP (planifiées)', data: days.map(d => P.day[d].hp), type: 'line', borderColor: '#1b2440', borderWidth: 2, pointRadius: 1.5, tension: .3 }] },
+  mkChart('c8d', { type: 'bar', data: { labels: slots, datasets: [
+      ...actsU.map((a, i) => ({ label: a, data: hS[a].map(v => Math.round(v * 100) / 100),
+        backgroundColor: PAL[i % PAL.length], stack: 's', borderRadius: 2 }))] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'bottom' } },
-      scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
-                y: { stacked: true, beginAtZero: true, ...axisY('heures') } } } });
-  /* tableau détail par jour */
-  let h = '<thead><tr><th>Date</th><th>Jour</th><th>Planifiés</th><th>dont FIM</th><th>HP (h)</th><th>Pause repas (h)</th><th>Heures de log (h)</th><th>FIM (h)</th></tr></thead><tbody>';
-  days.forEach(d => { const D8 = P.day[d];
-    h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td><td>${D8.plan}</td><td>${D8.fim}</td>` +
-         `<td>${fmt1(D8.hp)}</td><td>${fmt1(D8.repas)}</td><td>${fmt1(D8.hprod)}</td>` +
-         `<td>${fmt1(D8.fimh)}</td></tr>`;
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y ?? 0) + ' h' } } },
+      scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
+                y: { stacked: true, beginAtZero: true, ...axisY('heures / créneau') } } } });
+  /* matrice créneau × activité */
+  let hm = '<thead><tr><th>Créneau</th>' + actsU.map(a => `<th>${a} (h)</th>`).join('') + '<th>Total (h)</th></tr></thead><tbody>';
+  slots.forEach((s, i) => {
+    hm += `<tr><td>${s}</td>` + actsU.map(a => `<td>${hS[a][i] ? fmt1(hS[a][i]) : '·'}</td>`).join('') +
+      `<td><b>${fmt1(totS[i])}</b></td></tr>`;
   });
-  h += `</tbody><tfoot><tr><td colspan="2">Total période · moy. / jour</td><td>${fmt1(totPlan / days.length)} / j</td>` +
-       `<td>${fmt1(totFimN / days.length)} / j</td><td>${fmt(Math.round(HP))}</td><td>${fmt(Math.round(RP))}</td>` +
-       `<td>${fmt(Math.round(HPD))}</td><td>${fmt(Math.round(FM))}</td></tr></tfoot>`;
-  $('t8').innerHTML = h;
-  /* matrice créneau × jour (personnes planifiées en prod) */
-  let hm = '<thead><tr><th>Créneau</th>' + days.map(d => `<th>${dShort(d)}</th>`).join('') + '<th>Moy. / jour</th></tr></thead><tbody>';
+  hm += `</tbody><tfoot><tr><td>Σ ${lblC}</td>` + actsU.map(a => `<td>${fmt1(hS[a].reduce((x, y) => x + y, 0))}</td>`).join('') +
+    `<td>${fmt1(totH)}</td></tr></tfoot>`;
+  $('t8m').innerHTML = hm;
+  /* matrice personnes par créneau × jour */
+  let hp = '<thead><tr><th>Créneau</th>' + days.map(d => `<th>${dShort(d)}</th>`).join('') + '<th>Moy. / jour</th></tr></thead><tbody>';
   slots.forEach((s, i) => {
     const vals = days.map(d => (P.m.prod[d] || [])[i] || 0);
-    hm += `<tr><td>${s}</td>` + vals.map(v => `<td>${v ? fmt1(v) : '·'}</td>`).join('') +
+    hp += `<tr><td>${s}</td>` + vals.map(v => `<td>${v ? fmt1(v) : '·'}</td>`).join('') +
       `<td><b>${fmt1(vals.reduce((a, b) => a + b, 0) / days.length)}</b></td></tr>`;
   });
-  hm += '</tbody>';
-  $('t8m').innerHTML = hm;
-  $('h8').textContent = 'Personnes planifiées en prod = présence [Shift In, Shift Out) − pause repas · FIM (Compétences = FIM ou Total FIM = HP) compté hors prod · ' +
-    'HP du fichier = shift − pause repas · Heures de log = HP − Total FIM.';
-  $('w8Src').textContent = 'Planification : ' + ((P.meta && P.meta.file) || 'importée') + ' · ' + days.length + ' j · ' +
-    slots[0] + ' → ' + slots[slots.length - 1] + ' · ' + (jourPrecis ? 'jour ' + dShort(d8) : 'moyenne période');
+  hp += '</tbody>';
+  $('t8p').innerHTML = hp;
+  $('w8Src').textContent = 'Planification : ' + ((P.meta && P.meta.file) || 'importée') + ' · ' + lblC +
+    ' · ' + slots[0] + ' → ' + slots[slots.length - 1] + ' · répartition Skills' + (gfLbl() !== 'Total' ? ' · ' + gfLbl() : '');
 }
 function bind8() {
   $('w8V').addEventListener('change', r8);
   $('w8D').addEventListener('change', r8);
+  document.querySelectorAll('#p8subs button').forEach(b => b.addEventListener('click', () => {
+    P8V.view = b.dataset.v;
+    document.querySelectorAll('#p8subs button').forEach(x => x.classList.toggle('on', x === b));
+    gfDisables(); r8();
+  }));
   RENDERS.p8 = r8;
 }
 
 /* =====================================================================
    AMORÇAGE
    ===================================================================== */
-async function boot() {
-  try { const ls = localStorage.getItem(LS); if (ls) D = JSON.parse(ls); } catch (e) { /* ignoré */ }
-  if (!D) {
-    try { D = await (await fetch('data/data.json', { cache: 'no-store' })).json(); }
-    catch (e) { D = emptyData(); }
-  }
-  ensure();
-  if (!D.rm2) {                                                     // modèle RM : 1 fichier par onglet
-    try {
-      D.rm2 = await (await fetch('data/roadmap.json', { cache: 'no-store' })).json();
-      if (D.rm2 && D.rm2.meta && D.rm2.meta.file) D.meta.rm2 = D.rm2.meta.file;
-    } catch (e) { D.rm2 = null; }
-  }
-  if (!D.prev) {                                                    // prévision Webhelp : 1 fichier par onglet
-    try {
-      D.prev = await (await fetch('data/prevision.json', { cache: 'no-store' })).json();
-      if (D.prev && D.prev.meta && D.prev.meta.file) D.meta.prev = D.prev.meta.file;
-    } catch (e) { D.prev = null; }
-  }
-  if (!D.plan) {                                                    // planification (feuille Planning) : 1 fichier par onglet
-    try {
-      D.plan = await (await fetch('data/planning.json', { cache: 'no-store' })).json();
-      if (D.plan && D.plan.meta && D.plan.meta.file) D.meta.planA = D.plan.meta.file;
-    } catch (e) { D.plan = null; }
-  }
-  buildRoadmapCompat();
-  bindUI();
-  renderHead();
-  fillSelects();
-  go('p1');
-}
-function bindUI() {
-  document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.p)));
-  $('bImp').onclick = $('bImp').onclick || null;      // (ré)assignations idempotentes
-  $('bImp').addEventListener('click', () => $('imp').showModal());
-  $('bImpClose').addEventListener('click', () => $('imp').close());
-  $('bExp').addEventListener('click', dlJSON);
-  $('bExp2').addEventListener('click', dlJSON);
-  $('bDemo').addEventListener('click', demo);
-  $('bDemo2').addEventListener('click', demo);
-  $('bModele').addEventListener('click', dlModele);
-  $('bReset').addEventListener('click', () => {
-    if (!confirm('Effacer les données locales et recharger data/data.json ?')) return;
-    localStorage.removeItem(LS); location.reload();
-  });
-  bindImports();
-  bindGBar();
-  ['w1W', 'w1F', 's1U'].forEach(id => $(id).addEventListener('change', r1));
-  $('s2U').addEventListener('change', r2);
-  RENDERS.p1 = r1; RENDERS.p2 = r2; RENDERS.p3 = r3;
-  bind4();
-  bind5();
-  bind8();
-  boot2();
-}
-function boot2() { /* complété en partie 3 (page 5) */ }
-
 /* =====================================================================
-   P4 — PRÉVISION (Webhelp : vue par jour & par créneau 30 min)
-   Volume jour = prévu du mois × poids journalier (onglet « Poids ») ;
-   volume créneau = volume du jour × poids du créneau (col. R, 730 = 07:30,
-   profil « Lundi au samedi » ou « Dimanche » selon le jour choisi).
-   ===================================================================== */
-function prevSeriesGF() {                            // séries selon les filtres globaux (canal × activité)
-  const out = [];
-  [['a', 'PHONE', 'appels'], ['m', 'MAIL', 'mails']].forEach(([ck, ch, mk]) => {
-    if (!effChanSet().has(ch)) return;
-    PACTS.forEach(f => {
-      if (GF.acts.length && !GF.acts.includes(PLBL[f])) return;
-      const tot = Object.keys(D.prev.mois || {}).reduce((s, mo) =>
-        s + (((D.prev.mois[mo] || { appels: {}, mails: {} })[mk] || {})[f] || 0), 0);
-      if (!tot) return;                              // pas de prévu pour ce couple canal × activité
-      out.push({ k: ck + ':' + f, lbl: (ck === 'm' ? 'Mail ' : '') + PLBL[f], col: PCOL[f],
-        mail: ck === 'm', cpl: [[ck, f]], g: v => v[ck][f] });
-    });
-  });
-  return out;
-}
-function fill4() {
-  const sM = $('w4M');
-  if (!prevHas()) { sM.innerHTML = '<option value="">—</option>'; return; }
-  const curM = sM.value;
-  sM.innerHTML = prevMonths().map(k => `<option value="${k}">${mLab(k)}</option>`).join('');
-  const today = new Date().toISOString().slice(0, 10);
-  const withP = prevMonths().filter(m => prevDayKeys(m).length);
-  const defM = withP.includes(today.slice(0, 7)) ? today.slice(0, 7) : (withP[withP.length - 1] || prevMonths()[0]);
-  sM.value = [...sM.options].some(o => o.value === curM) ? curM : defM;
-}
-function defSlotDay() {                                 // jour du détail créneau : le plus chargé du mois
-  const m = $('w4M').value, days = prevDayKeys(m), cur = $('w4D').value;
-  if (cur && days.includes(cur)) { $('w4D').min = m + '-01'; $('w4D').max = days[days.length - 1]; return; }
-  let best = days[0] || '', bv = -1;
-  days.forEach(d => { const v = prevDayVol(m, d);
-    const t = PACTS.reduce((s, f) => s + v.a[f] + v.m[f], 0);
-    if (t > bv) { bv = t; best = d; } });
-  $('w4D').value = best;
-  $('w4D').min = m + '-01'; $('w4D').max = days[days.length - 1] || m + '-31';
-}
-function r4() {
-  const has = prevHas();
-  $('p4body').style.display = has ? '' : 'none';
-  $('p4empty').style.display = has ? 'none' : '';
-  if (!has) { $('w4Src').textContent = 'Prévision Webhelp : à importer'; return; }
-  const m = $('w4M').value || prevMonths()[0];
-  const series = prevSeriesGF();
-  const scopeLbl = gfLbl();
-  if (!series.length) {
-    ['c4a', 'c4b'].forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] }, options: { maintainAspectRatio: false } }));
-    $('k4').innerHTML = kpi('Prévision', '—', 'aucune série pour ' + gfLbl() + ' — canal non couvert par la prévision Webhelp');
-    ['t4a', 't4b', 't4c', 't4d'].forEach(id => $(id).textContent = '—');
-    $('h4a').textContent = 'Ajustez les filtres Flux / Channel / Activités (canal Chat non couvert par la prévision Webhelp).';
-    $('h4b').textContent = ''; $('h4m').textContent = '';
-    $('ta4').innerHTML = '<tbody><tr><td>—</td></tr></tbody>'; $('tb4').innerHTML = '<tbody><tr><td>—</td></tr></tbody>';
-    $('tm4').innerHTML = '';
-    $('w4Src').textContent = 'Prévision Webhelp : aucune série pour ce périmètre';
-    return;
-  }
-  const days = prevDayKeys(m);
-  const vols = days.map(d => prevDayVol(m, d));
-  const sData = series.map(s => vols.map(v => s.g(v)));
-  const tot = days.map((_, i) => sData.reduce((s, a) => s + (a[i] || 0), 0));
-  const sumAll = tot.reduce((s, v) => s + v, 0);
-  const iMax = tot.indexOf(Math.max(...tot));
-
-  /* ---- vue par jour ---- */
-  $('t4a').textContent = mLab(m) + ' · ' + scopeLbl;
-  $('t4c').textContent = mLab(m) + ' · ' + scopeLbl;
-  $('h4a').textContent = days.length
-    ? 'Volume = prévu du mois × poids journalier (onglet « Poids » du classeur Webhelp) · ' + days.length + ' jours pondérés · Σ = ' + fmt(sumAll)
-    : 'Poids journaliers absents pour ' + mLab(m) + ' — le classeur importé ne couvre pas ce mois.';
-  if (days.length) {
-    mkChart('c4a', { type: 'bar', data: { labels: days.map(dShort), datasets: series.map((s, si) => ({
-        label: s.lbl, data: sData[si], backgroundColor: s.mail ? s.col + '55' : s.col, borderColor: s.mail ? s.col : 'transparent',
-        borderWidth: s.mail ? 1 : 0, borderRadius: 3, stack: 's' })) },
-      options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt(c.parsed.y) } } },
-        scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
-                  y: { stacked: true, ...axisY('volume') } } } });
-  } else mkChart('c4a', { type: 'bar', data: { labels: [], datasets: [] }, options: { maintainAspectRatio: false } });
-
-  let h = '<thead><tr><th>Date</th><th>Jour</th>' + series.map(s => `<th>${s.lbl}</th>`).join('') + '<th>Total</th></tr></thead><tbody>';
-  days.forEach((d, i) => {
-    h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td>` +
-      series.map((s, si) => `<td>${sData[si][i] ? fmt(sData[si][i]) : '—'}</td>`).join('') +
-      `<td><b>${tot[i] ? fmt(tot[i]) : '—'}</b></td></tr>`;
-  });
-  h += '</tbody>';
-  if (days.length) h += `<tfoot><tr><td colspan="2">Total ${mLab(m)}</td>` +
-    series.map((s, si) => `<td>${fmt(sData[si].reduce((x, y) => x + y, 0))}</td>`).join('') + `<td>${fmt(sumAll)}</td></tr></tfoot>`;
-  $('ta4').innerHTML = h || '<tbody><tr><td>—</td></tr></tbody>';
-
-  /* ---- vue par créneau 30 min ---- */
-  defSlotDay();
-  const daySel = $('w4D').value;
-  const profSel = $('w4P').value;
-  const prof = profSel === 'auto' ? (jJours(daySel) === 'dimanche' ? 'dim' : 'ls') : profSel;
-  const cre = (D.prev.creneaux || {})[m] || {};
-  const vDay = prevDayVol(m, daySel);
-  const slotAgg = (s, t) => s.cpl.reduce((sum, [c, f]) =>
-    sum + (vDay[c][f] || 0) * (((((cre[f] || {})[prof] || {})[t]) || 0)), 0);
-  const slots = [...new Set(series.flatMap(s => s.cpl.map(([c, f]) => Object.keys((cre[f] || {})[prof] || {})).flat()))]
-    .map(Number).sort((a, b) => a - b);
-  const sDataC = series.map(s => slots.map(t => slotAgg(s, t)));
-  const totC = slots.map((_, i) => sDataC.reduce((s, a) => s + (a[i] || 0), 0));
-  /* créneaux affichés : ceux du profil avec un volume (le dimanche : matin uniquement) */
-  const vis = slots.map((t, i) => [t, i]).filter(([, i]) => totC[i] > 0.005);
-  const sV = vis.map(([t]) => t);
-  const sDataV = sDataC.map(a => vis.map(([, i]) => a[i]));
-  const totV = vis.map(([, i]) => totC[i]);
-  const sumDay = totC.reduce((s, v) => s + v, 0);
-  const iMaxC = totV.indexOf(Math.max(...totV));
-  const hasCre = sV.length > 0 && sumDay > 0;
-
-  $('t4b').textContent = (daySel ? dShort(daySel) + ' (' + jJours(daySel) + ')' : '—') + ' · profil ' +
-    (prof === 'dim' ? 'Dimanche (matin)' : 'Lundi au samedi');
-  $('t4d').textContent = (daySel ? dShort(daySel) + ' (' + jJours(daySel) + ')' : '—') + ' · profil ' +
-    (prof === 'dim' ? 'Dimanche (matin)' : 'Lundi au samedi');
-  $('h4b').textContent = hasCre
-    ? 'Volume créneau = volume du jour × poids du créneau (colonne R du fichier, 730 = 07:30) · pointe ' +
-      slotLab(sV[iMaxC]) + ' à ' + fmt(totV[iMaxC]) + ' · Σ = ' + fmt(sumDay)
-    : 'Créneaux 30 min non disponibles pour ce jour / ce mois (profil « ' + (prof === 'dim' ? 'Dimanche' : 'Lundi au samedi') + ' »).';
-  if (hasCre) {
-    mkChart('c4b', { type: 'bar', data: { labels: sV.map(slotLab), datasets: series.map((s, si) => ({
-        label: s.lbl, data: sDataV[si], backgroundColor: s.mail ? s.col + '55' : s.col, borderColor: s.mail ? s.col : 'transparent',
-        borderWidth: s.mail ? 1 : 0, borderRadius: 3, stack: 's' })) },
-      options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y) } } },
-        scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
-                  y: { stacked: true, ...axisY('volume / 30 min') } } } });
-  } else mkChart('c4b', { type: 'bar', data: { labels: [], datasets: [] }, options: { maintainAspectRatio: false } });
-
-  let hc = '<thead><tr><th>Créneau</th>' + series.map(s => `<th>${s.lbl}</th>`).join('') + '<th>Total</th><th>% du jour</th></tr></thead><tbody>';
-  sV.forEach((t, i) => {
-    hc += `<tr><td>${slotLab(t)}</td>` +
-      series.map((s, si) => `<td>${sDataV[si][i] ? fmt1(sDataV[si][i]) : '—'}</td>`).join('') +
-      `<td><b>${totV[i] ? fmt(totV[i]) : '—'}</b></td><td>${sumDay ? fmt(Math.round(totV[i] / sumDay * 1000) / 10) + ' %' : '—'}</td></tr>`;
-  });
-  hc += '</tbody>';
-  if (hasCre) hc += `<tfoot><tr><td>Total du jour</td>` +
-    series.map((s, si) => `<td>${fmt(sDataV[si].reduce((x, y) => x + y, 0))}</td>`).join('') +
-    `<td>${fmt(sumDay)}</td><td>100 %</td></tr></tfoot>`;
-  $('tb4').innerHTML = hc || '<tbody><tr><td>—</td></tr></tbody>';
-
-  /* ---- KPIs ---- */
-  const moisTot = series.reduce((s, sr) => s + sr.cpl.reduce((x, [c, f]) =>
-    x + (((D.prev.mois || {})[m] || { appels: {}, mails: {} })[c === 'a' ? 'appels' : 'mails'][f] || 0), 0), 0);
-  const hasBoth = series.some(s => !s.mail) && series.some(s => s.mail);
-  $('k4').innerHTML =
-    kpi('Prévu ' + mLab(m), fmt(days.length ? sumAll : moisTot),
-      scopeLbl + (D.prev.meta && D.prev.meta.snapshot ? ' · prévision au ' + dShort(D.prev.meta.snapshot) : '')) +
-    (days.length ? kpi('Moyenne / jour', fmt(sumAll / days.length), days.length + ' jours pondérés') : '') +
-    (days.length && tot[iMax] ? kpi('Jour le plus chargé', fmt(tot[iMax]), dShort(days[iMax]) + ' · ' + jJours(days[iMax])) : '') +
-    (hasCre ? kpi('Pointe 30 min', fmt(totV[iMaxC]), slotLab(sV[iMaxC]) + ' · ' + dShort(daySel) + ' (' + jJours(daySel) + ')') : '') +
-    (hasBoth && days.length ? (() => {
-      const a = series.filter(s => !s.mail).reduce((s, sr) => s + vols.reduce((x, v) => x + sr.g(v), 0), 0);
-      const mm = series.filter(s => s.mail).reduce((s, sr) => s + vols.reduce((x, v) => x + sr.g(v), 0), 0);
-      return kpi('Répartition', pctS(a, a + mm), 'appels ' + fmt(a) + ' · mails ' + fmt(mm)); })() : '');
-
-  /* ---- synthèse mensuelle ---- */
-  const allM = prevMonths();
-  let hm = '<thead><tr><th>Mois</th><th>Hyper</th><th>C2E</th><th>AFR</th><th>Drive</th><th>SAV</th><th>Direct</th><th>Σ Appels</th>' +
-    '<th>Mail Hyper/C2E</th><th>Mail AFR</th><th>Mail Drive</th><th>Σ Mails</th><th>Σ Total</th></tr></thead><tbody>';
-  const totM = { a: 0, m: 0 };
-  allM.forEach(mk => { const o = (D.prev.mois || {})[mk] || { appels: {}, mails: {} };
-    const A = PACTS.reduce((s, f) => s + (o.appels[f] || 0), 0), M = PACTS.reduce((s, f) => s + (o.mails[f] || 0), 0);
-    totM.a += A; totM.m += M;
-    hm += `<tr${mk === m ? ' class="sel"' : ''}><td>${mLab(mk)}</td>` +
-      ['hyper', 'c2e', 'afr', 'drive', 'sav', 'direct'].map(f => `<td>${o.appels[f] ? fmt(o.appels[f]) : '—'}</td>`).join('') +
-      `<td><b>${A ? fmt(A) : '—'}</b></td>` +
-      ['hyper', 'afr', 'drive'].map(f => `<td>${o.mails[f] ? fmt(o.mails[f]) : '—'}</td>`).join('') +
-      `<td><b>${M ? fmt(M) : '—'}</b></td><td><b>${A + M ? fmt(A + M) : '—'}</b></td></tr>`;
-  });
-  hm += `</tbody><tfoot><tr><td>Total</td><td colspan="6"></td><td>${fmt(totM.a)}</td><td colspan="3"></td>` +
-    `<td>${fmt(totM.m)}</td><td>${fmt(totM.a + totM.m)}</td></tr></tfoot>`;
-  $('tm4').innerHTML = hm;
-  const noW = allM.filter(mk => !prevDayKeys(mk).length);
-  $('h4m').textContent = 'Prévus mensuels par flux (onglet « 2026 » du classeur Webhelp)' +
-    (noW.length ? ' · poids journaliers absents pour ' + noW.map(mLab).join(', ') + ' : vues par jour / créneau indisponibles.' : '.');
-
-  $('w4Src').textContent = 'Prévision Webhelp : ' + (D.meta.prev || (D.prev.meta && D.prev.meta.file) || 'Webhelp') +
-    (D.prev.meta && D.prev.meta.snapshot ? ' · au ' + dShort(D.prev.meta.snapshot) : '') +
-    ' · ' + (days.length ? days.length + ' j pondérés ' + mLab(m) : mLab(m) + ' (sans poids)');
-}
-function bind4() {
-  $('w4M').addEventListener('change', () => { defSlotDay(); r4(); });
-  $('w4D').addEventListener('change', r4);
-  $('w4P').addEventListener('change', r4);
-  RENDERS.p4 = r4;
-}
-
-/* =====================================================================
-   P5 — PRODUCTIVITÉ (sections par canal selon les filtres globaux)
-   Phone : DRM + Vonage · Mail : Export Mail · Chat : pas encore raccordé
+   P5 — ANALYSE RÉALISÉ (ex-Productivité — sections par canal selon les filtres globaux)
+   Phone : EXT_Entrant (Données DASHBOARD CAPA) · Mail : EXT_Email · Chat : pas encore raccordé
    QS = traités/reçus · QP = reçus/prévision · QS<60s · QE si QP>115% · T/P
    DMT · Productivité = traités / heure de traitement · TO = traitement / heures planifiées
+   (indicateurs spécifiques à définir avec l'équipe — rework prévu)
    ===================================================================== */
 const tauxChip = t => t >= 65 ? 'g' : t >= 50 ? 'a' : 'r';   /* taux < 60 s (qualité) */
 const tauxReal = t => t >= 95 ? 'g' : t >= 80 ? 'a' : 'r';   /* taux d'occupation / couverture */
-function planHoursOf(act, d) {                                      // heures planifiées (match insensible à la casse)
+function planHoursOf(act, d, chan) {                                // heures planifiées (par canal si précisé)
   const P = D.planH, ai = P.dates.indexOf(d);
   if (ai < 0) return 0;
+  if (chan && P.fc) {
+    let s = 0, any = false;
+    Object.keys(P.fc).forEach(k => {
+      const i = k.indexOf('|');
+      if (norm(k.slice(0, i)) === norm(act)) { any = true; if (k.slice(i + 1) === chan) s += P.fc[k][ai] || 0; }
+    });
+    if (any) return s;
+  }
   const k = P.acts.find(x => norm(x) === norm(act));
   return k ? (P.f[k] || [])[ai] || 0 : 0;
 }
@@ -2253,7 +2366,7 @@ function ch5(canal) {                                               // adaptateu
     const prevOf = (f, d) => { const p = PM[norm(f)]; return p ? (p[d] || 0) : 0; };
     return {
       dates: M.dates, acts: M.flows, has: M.dates.length > 0,
-      emptyMsg: ['Aucune donnée Mail.', 'Importez un « Export Mail » (une ligne par courriel) via le bouton Importer ; la prévision via la carte « Prévision Mail ».'],
+      emptyMsg: ['Aucune donnée Mail.', 'Importez le fichier « Données DASHBOARD CAPA AUCHAN » (feuille EXT_Email — réalisé mail) via le bouton Importer.'],
       get(f, i) { const F = M.f[f]; return { rec: F.rec[i] || 0, tr: F.tr[i] || 0, t60: F.t60[i] || 0, h: (F.del[i] || 0) / 3600, n: 0 }; },
       prev: (f, d) => prevOf(f, d),
       dmt: v => v.tr ? v.h * 3600 / v.tr : null
@@ -2265,7 +2378,7 @@ function ch5(canal) {                                               // adaptateu
     const acts = [...new Set([...RFLOW, ...(M.flows || [])])];
     return {
       dates, acts, has: dates.length > 0,
-      emptyMsg: ['Aucune donnée Phone.', 'Importez le DRM (réalisé) et/ou l\'Export Vonage Call (DMT) via le bouton Importer.'],
+      emptyMsg: ['Aucune donnée Phone.', 'Importez le fichier « Données DASHBOARD CAPA AUCHAN » (feuille EXT_Entrant — réalisé voix + DMT) via le bouton Importer.'],
       get(f, i) {
         const d = dates[i], ri = R.dates.indexOf(d), mi = M.dates.indexOf(d);
         const RR = R.f[f] || { r: [], t: [], s: [] };
@@ -2297,10 +2410,10 @@ function r5() {                                     // une section par canal ret
   chans.forEach(c => { const s = r5Canal(c); if (s) sums.push(s); });
   $('p5empty').style.display = sums.length ? 'none' : '';
   if (!sums.length) {
-    $('p5emptyT').textContent = 'Aucune donnée Productivité pour ce périmètre.';
-    $('p5emptyS').textContent = 'Ajustez les filtres Flux / Channel / Activités, ou importez les sources (DRM, Export Vonage Call, Export Mail, Prévision Mail).';
+    $('p5emptyT').textContent = 'Aucune donnée Analyse réalisé pour ce périmètre.';
+    $('p5emptyS').textContent = 'Ajustez les filtres Flux / Channel / Activités, ou importez le fichier « Données DASHBOARD CAPA AUCHAN » (feuilles EXT_Entrant et EXT_Email).';
   }
-  $('w5Src').textContent = sums.length ? sums.join(' · ') : 'Productivité : aucune donnée';
+  $('w5Src').textContent = sums.length ? sums.join(' · ') : 'Analyse réalisé : aucune donnée';
 }
 function r5Canal(canal) {                           // section d'un canal ; renvoie le résumé ou null
   const C = ch5(canal);
@@ -2308,8 +2421,8 @@ function r5Canal(canal) {                           // section d'un canal ; renv
   const div = document.createElement('div');
   $('p5body').appendChild(div);
   if (!C || !C.has) {
-    const msg = canal === 'phone' ? ['Aucune donnée Phone.', 'Importez le DRM (réalisé) et/ou l\'Export Vonage Call (DMT) via le bouton Importer.']
-      : canal === 'mail' ? ['Aucune donnée Mail.', 'Importez un « Export Mail » (une ligne par courriel) et la « Prévision Mail » via le bouton Importer.']
+    const msg = canal === 'phone' ? ['Aucune donnée Phone.', 'Importez le fichier « Données DASHBOARD CAPA AUCHAN » (feuille EXT_Entrant — réalisé voix + DMT) via le bouton Importer.']
+      : canal === 'mail' ? ['Aucune donnée Mail.', 'Importez le fichier « Données DASHBOARD CAPA AUCHAN » (feuille EXT_Email — réalisé mail) via le bouton Importer.']
       : ['Canal Chat — pas encore de source raccordée.', 'Les exports nécessaires (plateforme de chat) ne sont pas encore définis. Les indicateurs QS, QP, QE, DMT, productivité et taux d\'occupation s\'afficheront dès le raccordement.'];
     div.innerHTML = `<div class="card" style="padding:20px"><b>${lbl} — ${msg[0]}</b><br><span class="hint">${msg[1]}</span></div>`;
     return null;
@@ -2341,7 +2454,7 @@ function r5Canal(canal) {                           // section d'un canal ; renv
   const prodJ = hJ.map((h, j) => h ? trJ[j] / h : null);
   const toJ = hJ.map((h, j) => {                                     // TO = traitement / heures planifiées
     const d = C.dates[idx[j]]; let ph = 0;
-    acts.forEach(a => { ph += planHoursOf(a, d); });
+    acts.forEach(a => { ph += planHoursOf(a, d, canal === 'mail' ? 'MAIL' : 'PHONE'); });
     return ph ? Math.min(999, Math.round(h / ph * 100)) : null;
   });
 
@@ -2425,7 +2538,7 @@ function r5Canal(canal) {                           // section d'un canal ; renv
       const qp = q(v.rec, pv), tp = q(v.tr, pv), qe = (qp != null && qp > 115) ? Math.round(v.tr / pv * 92) : null;
       const dm = C.dmt(v);
       const prod = v.h ? v.tr / v.h : null;
-      const ph = planHoursOf(a, d);
+      const ph = planHoursOf(a, d, canal === 'mail' ? 'MAIL' : 'PHONE');
       const to = (ph && v.h) ? Math.min(999, Math.round(v.h / ph * 100)) : null;
       h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td><td>${a}</td><td>${v.rec ? fmt(v.rec) : '—'}</td>` +
            `<td>${v.tr ? fmt(v.tr) : '—'}</td><td>${pv ? fmt(Math.round(pv)) : '—'}</td>` +

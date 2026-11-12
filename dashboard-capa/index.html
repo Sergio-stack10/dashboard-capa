@@ -37,6 +37,12 @@ nav.tabs button{border:1px solid transparent;background:transparent;color:var(--
 nav.tabs button:hover{color:var(--pri)}
 nav.tabs button.on{background:var(--card);border-color:var(--line);border-bottom-color:var(--card);color:var(--pri);box-shadow:var(--sh)}
 nav.tabs .badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:99px;background:var(--pri);color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+/* ---------- sous-onglets ---------- */
+.subtabs{display:flex;gap:6px;padding:10px 20px 0;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.subtabs button{border:1px solid transparent;background:transparent;color:var(--mut);padding:7px 13px;border-radius:9px 9px 0 0;font-weight:600;font-size:12.5px}
+.subtabs button:hover{color:var(--pri)}
+.subtabs button.on{background:var(--card);border-color:var(--line);border-bottom-color:var(--card);color:var(--pri)}
+.subbar{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px}
 .prodgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
 .pitem label{display:block;font-size:11px;font-weight:700;color:var(--mut);margin-bottom:2px;text-transform:uppercase;letter-spacing:.4px}
 .pitem input{width:100%;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit}
@@ -152,11 +158,9 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 
 <nav class="tabs" role="tablist">
   <button data-p="p1" class="on">Roadmap</button>
-  <button data-p="p4">Prévision</button>
-  <button data-p="p2">Capacitaire</button>
   <button data-p="p8">Planification</button>
   <button data-p="p3">Analyse capa</button>
-  <button data-p="p5">Productivité</button>
+  <button data-p="p5">Analyse réalisé</button>
 </nav>
 
 <!-- ================= FILTRES GLOBAUX (communs à tous les onglets) ================= -->
@@ -164,13 +168,13 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   <div class="grp" id="gfGW"><label>Granularité</label><select id="gG">
     <option value="jour">Jour</option><option value="semaine">Semaine</option><option value="mois">Mois</option></select></div>
   <div class="grp fbox fboxF" id="gfFW"><div class="fhead"><label>Flux</label>
-    <span class="factions"><button type="button" class="fmini" data-g="flux" data-on="1">Tout</button><button type="button" class="fmini" data-g="flux" data-on="0">Aucun</button></span></div>
+    <span class="factions"><button type="button" class="fmini" data-g="flux" data-on="1">Tout sélectionner</button><button type="button" class="fmini" data-g="flux" data-on="0">Tout désélectionner</button></span></div>
     <div class="chips" id="gfFlux"></div></div>
   <div class="grp fbox fboxC" id="gfCW"><div class="fhead"><label>Channel</label>
-    <span class="factions"><button type="button" class="fmini" data-g="chan" data-on="1">Tout</button><button type="button" class="fmini" data-g="chan" data-on="0">Aucun</button></span></div>
+    <span class="factions"><button type="button" class="fmini" data-g="chan" data-on="1">Tout sélectionner</button><button type="button" class="fmini" data-g="chan" data-on="0">Tout désélectionner</button></span></div>
     <div class="chips" id="gfChan"></div></div>
   <div class="grp fbox fboxA" id="gfAW"><div class="fhead"><label>Activités</label>
-    <span class="factions"><button type="button" class="fmini" data-g="acts" data-on="1">Tout</button><button type="button" class="fmini" data-g="acts" data-on="0">Aucun</button></span></div>
+    <span class="factions"><button type="button" class="fmini" data-g="acts" data-on="1">Tout sélectionner</button><button type="button" class="fmini" data-g="acts" data-on="0">Tout désélectionner</button></span></div>
     <div class="chips" id="gfActs"></div></div>
   <div class="grp" id="gfPW"><label>Période</label><select id="gP">
     <option value="all" selected>Tout</option><option value="last">Mois le plus récent</option><option value="prev">Mois précédent</option>
@@ -181,94 +185,163 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 
 <main>
 
-<!-- ================= P1 : ROADMAP (besoin & capacité — modèle RM S46+) ================= -->
+<!-- ================= P1 : ROADMAP — 3 sous-onglets ================= -->
 <section id="p1" class="page on">
-  <div class="toolbar">
-    <div class="grp"><label>Semaine analysée</label><select id="w1W"></select></div>
-    <div class="grp"><label>Fenêtre</label><select id="w1F">
-      <option value="13" selected>13 semaines</option><option value="27">27 semaines</option><option value="all">Tout</option></select></div>
+  <div class="subtabs" id="p1subs" role="tablist">
+    <button data-v="ann" class="on">Vue annuelle — par semaine</button>
+    <button data-v="jour">Vue journalière</button>
+    <button data-v="cre">Vue par créneaux</button>
+  </div>
+
+  <!-- filtres vue annuelle -->
+  <div class="subbar" id="p1fAnn">
+    <div class="grp"><label>Année</label><select id="w1Y"></select></div>
+    <div class="grp"><label>Mois</label><select id="w1M"></select></div>
     <div class="grp"><label>Unité heures</label><select id="s1U">
       <option value="log" selected>Heures de log</option><option value="prod">Heures de prod</option></select></div>
     <div class="src" id="w1Src"></div>
   </div>
-  <div class="kpis" id="k1"></div>
-  <div class="grid2">
-    <div class="card"><h3>1 · Heures — capacité vs besoin</h3><div class="charthold"><canvas id="c1a"></canvas></div></div>
-    <div class="card"><h3>2 · Actes — capacité vs prévision finale</h3><div class="charthold"><canvas id="c1b"></canvas></div></div>
-    <div class="card"><h3>3 · ETP — besoin vs effectif productif</h3><div class="charthold"><canvas id="c1c"></canvas></div></div>
-    <div class="card"><h3>4 · Effectif</h3><div class="charthold"><canvas id="c1d"></canvas></div></div>
-    <div class="card"><h3>5 · SLA / QE vs cible</h3><div class="charthold"><canvas id="c1e"></canvas></div></div>
-    <div class="card"><h3>6 · DMT — secondes</h3><div class="charthold"><canvas id="c1f"></canvas></div></div>
-    <div class="card"><h3>7 · Taux d'occupation</h3><div class="charthold"><canvas id="c1g"></canvas></div></div>
-    <div class="card"><h3>8 · Absentéisme</h3><div class="charthold"><canvas id="c1h"></canvas></div></div>
+  <!-- filtres vue journalière -->
+  <div class="subbar" id="p1fJour" style="display:none">
+    <div class="grp"><label>Année</label><select id="w1JY"></select></div>
+    <div class="grp"><label>Mois</label><select id="w1JM"></select></div>
+    <div class="grp"><label>Semaine</label><select id="w1JW"></select></div>
+    <div class="grp"><label>Personnalisé — du / au</label>
+      <div style="display:flex;gap:6px"><input type="date" id="w1JA"><input type="date" id="w1JB"></div></div>
+    <div class="src" id="w1JSrc"></div>
   </div>
-  <div class="card"><h3>9 · Congés — ETP par semaine</h3><div class="charthold"><canvas id="c1i"></canvas></div></div>
-  <div class="card"><h3>Détail hebdomadaire — <span id="t1Per">Total</span></h3>
-    <div class="tblwrap"><table id="t1"></table></div>
-    <p class="hint" id="h1"></p></div>
-</section>
+  <!-- filtres vue créneaux -->
+  <div class="subbar" id="p1fCre" style="display:none">
+    <div class="grp"><label>Année</label><select id="w1CY"></select></div>
+    <div class="grp"><label>Mois</label><select id="w1CM"></select></div>
+    <div class="grp"><label>Semaine</label><select id="w1CW"></select></div>
+    <div class="grp"><label>Personnalisé — du / au</label>
+      <div style="display:flex;gap:6px"><input type="date" id="w1CA"><input type="date" id="w1CB"></div></div>
+    <div class="grp"><label>Vue créneaux</label><select id="w1CV">
+      <option value="moy" selected>Moyenne période</option><option value="jour">Jour précis</option></select></div>
+    <div class="grp"><label>Jour (créneaux)</label><input type="date" id="w1CD"></div>
+    <div class="src" id="w1CSrc"></div>
+  </div>
 
-<!-- ================= P4 : PRÉVISION (Webhelp — par jour & créneaux 30 min) ================= -->
-<section id="p4" class="page">
-  <div class="toolbar">
-    <div class="grp"><label>Mois</label><select id="w4M"></select></div>
-    <div class="src" id="w4Src"></div>
-  </div>
-  <div id="p4body">
-    <div class="kpis" id="k4"></div>
+  <!-- vue annuelle (par semaine) -->
+  <div id="p1vAnn">
+    <div class="kpis" id="k1"></div>
     <div class="grid2">
-      <div class="card"><h3>Prévision par jour — <span id="t4a">—</span></h3>
-        <div class="charthold"><canvas id="c4a"></canvas></div><p class="hint" id="h4a"></p></div>
-      <div class="card"><h3>Prévision par créneau 30 min — <span id="t4b">—</span></h3>
-        <div class="toolbar" style="margin-bottom:8px">
-          <div class="grp"><label>Jour</label><input type="date" id="w4D"></div>
-          <div class="grp"><label>Profil</label><select id="w4P">
-            <option value="auto" selected>Auto (selon le jour)</option><option value="ls">Lundi au samedi</option><option value="dim">Dimanche</option></select></div>
-        </div>
-        <div class="charthold"><canvas id="c4b"></canvas></div><p class="hint" id="h4b"></p></div>
+      <div class="card"><h3>1 · Heures — capacité vs besoin</h3><div class="charthold"><canvas id="c1a"></canvas></div></div>
+      <div class="card"><h3>2 · Actes — capacité vs prévision finale</h3><div class="charthold"><canvas id="c1b"></canvas></div></div>
+      <div class="card"><h3>3 · ETP — besoin vs effectif productif</h3><div class="charthold"><canvas id="c1c"></canvas></div></div>
+      <div class="card"><h3>4 · Effectif</h3><div class="charthold"><canvas id="c1d"></canvas></div></div>
+      <div class="card"><h3>5 · SLA / QE vs cible</h3><div class="charthold"><canvas id="c1e"></canvas></div></div>
+      <div class="card"><h3>6 · DMT — secondes</h3><div class="charthold"><canvas id="c1f"></canvas></div></div>
+      <div class="card"><h3>7 · Taux d'occupation</h3><div class="charthold"><canvas id="c1g"></canvas></div></div>
+      <div class="card"><h3>8 · Absentéisme</h3><div class="charthold"><canvas id="c1h"></canvas></div></div>
     </div>
-    <div class="card"><h3>Détail par jour — <span id="t4c">—</span></h3><div class="tblwrap"><table id="ta4"></table></div></div>
-    <div class="card"><h3>Détail par créneau — <span id="t4d">—</span></h3><div class="tblwrap"><table id="tb4"></table></div></div>
-    <div class="card"><h3>Synthèse mensuelle — prévus par flux</h3><div class="tblwrap"><table id="tm4"></table></div>
-      <p class="hint" id="h4m"></p></div>
+    <div class="card"><h3>9 · Congés — ETP par semaine</h3><div class="charthold"><canvas id="c1i"></canvas></div></div>
+    <div class="card"><h3>Détail hebdomadaire — <span id="t1Per">Total</span></h3>
+      <div class="tblwrap"><table id="t1"></table></div>
+      <p class="hint" id="h1"></p></div>
   </div>
-  <div class="card empty" id="p4empty" style="display:none">
-    <b>Aucune prévision Webhelp.</b><br>Importez le classeur Webhelp (.xlsx — onglets <code>2026</code> + <code>Poids</code>) via le bouton <b>Importer</b> :
-    prévus mensuels par flux, poids journaliers (vue par jour) et créneaux 30 min (colonne R, format 730 = 07:30 — vue par créneau).
+
+  <!-- vue journalière -->
+  <div id="p1vJour" style="display:none">
+    <div class="kpis" id="k1j"></div>
+    <div class="grid2">
+      <div class="card"><h3>1 · Actes — capa roadmap vs prévision finale (par jour)</h3><div class="charthold"><canvas id="c1ja"></canvas></div></div>
+      <div class="card"><h3>2 · Heures — capa roadmap vs besoin (par jour)</h3><div class="charthold"><canvas id="c1jb"></canvas></div></div>
+      <div class="card"><h3>3 · SLA / QE vs cible (par jour)</h3><div class="charthold"><canvas id="c1jc"></canvas></div></div>
+      <div class="card"><h3>4 · ETP — besoin vs effectif productif (par jour)</h3><div class="charthold"><canvas id="c1jd"></canvas></div></div>
+      <div class="card"><h3>5 · DMT — secondes</h3><div class="charthold"><canvas id="c1je"></canvas></div></div>
+      <div class="card"><h3>6 · Taux d'occupation</h3><div class="charthold"><canvas id="c1jf"></canvas></div></div>
+      <div class="card"><h3>7 · Absentéisme</h3><div class="charthold"><canvas id="c1jg"></canvas></div></div>
+      <div class="card"><h3>8 · Congés</h3><div class="charthold"><canvas id="c1jh"></canvas></div></div>
+    </div>
+    <div class="card"><h3>Détail par jour — <span id="t1jPer">Total</span></h3>
+      <div class="tblwrap"><table id="t1j"></table></div>
+      <p class="hint" id="h1j"></p></div>
+  </div>
+
+  <!-- vue par créneaux -->
+  <div id="p1vCre" style="display:none">
+    <div class="kpis" id="k1c"></div>
+    <div class="grid2">
+      <div class="card"><h3>1 · Capa en actes par créneau 30 min</h3><div class="charthold"><canvas id="c1ca"></canvas></div></div>
+      <div class="card"><h3>2 · Capa en heures par créneau 30 min</h3><div class="charthold"><canvas id="c1cb"></canvas></div></div>
+    </div>
+    <div class="card"><h3>Détail par créneau 30 min — <span id="t1cPer">Total</span></h3>
+      <div class="tblwrap"><table id="t1c"></table></div>
+      <p class="hint" id="h1c"></p></div>
   </div>
 </section>
 
-<!-- ================= P2 : CAPACITAIRE (actes & heures) ================= -->
-<section id="p2" class="page">
-  <div class="toolbar">
-    <div class="grp"><label>Unité</label><select id="s2U">
-      <option value="a" selected>Actes</option><option value="h">Heures</option></select></div>
-    <div class="src" id="w2Src"></div>
+<!-- ================= P8 : PLANIFICATION — 2 sous-onglets (répartition par skills) ================= -->
+<section id="p8" class="page">
+  <div class="subtabs" id="p8subs" role="tablist">
+    <button data-v="jour" class="on">Vue journalière</button>
+    <button data-v="cre">Vue par créneaux</button>
   </div>
-  <div class="kpis" id="k2"></div>
-  <div class="card"><h3>Capacitaire vs Prévu / Contractuel</h3><div class="charthold tall"><canvas id="c2a"></canvas></div></div>
-  <div class="card"><h3>Détail par période</h3><div class="tblwrap"><table id="t2"></table></div></div>
-  <div class="card"><h3>Hypothèses de productivité — actes / heure</h3>
-    <p class="hint">Saisissez les actes traités par heure et par activité. Elles convertissent heures ↔ actes : capacitaire en heures (si absente du fichier CAPA), capa réel de l'onglet « Analyse capa » (repli si le modèle RM n'a pas la productivité), productivité et taux d'occupation.</p>
-    <div class="prodgrid" id="prodEd"></div>
+  <div class="subbar" id="p8fJour">
+    <div class="src" id="w8JSrc"></div>
+  </div>
+  <div class="subbar" id="p8fCre" style="display:none">
+    <div class="grp"><label>Vue créneaux</label><select id="w8V">
+      <option value="moy" selected>Moyenne période</option><option value="jour">Jour précis</option></select></div>
+    <div class="grp"><label>Jour (créneaux)</label><input type="date" id="w8D"></div>
+    <div class="src" id="w8Src"></div>
+  </div>
+
+  <!-- vue journalière -->
+  <div id="p8vJour">
+    <div class="kpis" id="k8"></div>
+    <div class="grid2">
+      <div class="card"><h3>1 · Heures planifiées par jour et par activité (répartition selon les compétences)</h3><div class="charthold"><canvas id="c8a"></canvas></div></div>
+      <div class="card"><h3>2 · Personnes planifiées par jour — prod &amp; FIM hors prod</h3><div class="charthold"><canvas id="c8b"></canvas></div></div>
+    </div>
+    <div class="card"><h3>Détail par jour — heures réparties par activité × canal</h3>
+      <div class="tblwrap"><table id="t8"></table></div>
+      <p class="hint" id="h8"></p></div>
+  </div>
+
+  <!-- vue par créneaux -->
+  <div id="p8vCre" style="display:none">
+    <div class="kpis" id="k8c"></div>
+    <div class="grid2">
+      <div class="card"><h3>1 · Personnes planifiées par créneau 30 min</h3><div class="charthold"><canvas id="c8c"></canvas></div></div>
+      <div class="card"><h3>2 · Heures planifiées par créneau et par activité</h3><div class="charthold"><canvas id="c8d"></canvas></div></div>
+    </div>
+    <div class="card"><h3>Matrice — heures planifiées par créneau × activité</h3>
+      <div class="tblwrap"><table id="t8m"></table></div></div>
+    <div class="card"><h3>Matrice — personnes planifiées (prod) par créneau</h3>
+      <div class="tblwrap"><table id="t8p"></table></div></div>
+  </div>
+
+  <div class="card empty" id="p8empty" style="display:none">
+    <b>Aucune planification.</b><br>Importez le classeur « Données DASHBOARD CAPA AUCHAN » (.xlsx — feuilles <code>Planning</code> et
+    <code>Skills</code>) via le bouton <b>Importer</b> : les heures planifiées sont réparties par activité et par canal
+    selon les compétences des agents (HYPER/DRIVE 50/50 · ALL toutes activités et canaux · SAV sur PHONE · CHAT sur CHAT),
+    hors FIM (hors prod) et hors pause repas. Les données du fichier du 01/11 au 10/11/2026 sont préchargées.
   </div>
 </section>
 
-<!-- ================= P3 : ANALYSE CAPA (prévu vs réel) ================= -->
+<!-- ================= P3 : ANALYSE CAPA (capa roadmap vs planif) ================= -->
 <section id="p3" class="page">
   <div class="toolbar">
     <div class="src" id="w3Src"></div>
   </div>
   <div class="kpis" id="k3"></div>
   <div class="grid2">
-    <div class="card"><h3>Capa en actes — prévu vs réel vs réalisé</h3><div class="charthold"><canvas id="c3a"></canvas></div></div>
-    <div class="card"><h3>Capa en heures — prévu vs réel (planifié hors FIM × (1 − absentéisme))</h3><div class="charthold"><canvas id="c3b"></canvas></div></div>
+    <div class="card"><h3>Capa en actes — roadmap vs planif</h3><div class="charthold"><canvas id="c3a"></canvas></div></div>
+    <div class="card"><h3>Capa en heures — roadmap vs planif (planifié hors FIM × (1 − absentéisme))</h3><div class="charthold"><canvas id="c3b"></canvas></div></div>
   </div>
-  <div class="card"><h3>Détail par période</h3><div class="tblwrap"><table id="t3"></table></div></div>
+  <div class="card"><h3>Détail par période — uniquement les jours avec planification</h3><div class="tblwrap"><table id="t3"></table></div></div>
+  <div class="card"><h3>Hypothèses de productivité — actes / heure</h3>
+    <p class="hint">Saisissez les actes traités par heure et par activité : elles convertissent les heures planifiées en actes planifiés
+    (capa planif) lorsque le modèle RM n'a pas la productivité. Le modèle RM (section « Productivité ») est utilisé en priorité.</p>
+    <div class="prodgrid" id="prodEd"></div>
+  </div>
   <div class="card"><p class="hint" id="p3Hint"></p></div>
 </section>
 
-<!-- ================= P5 : PRODUCTIVITÉ (sections par canal : Phone / Mail / Chat) ================= -->
+<!-- ================= P5 : ANALYSE RÉALISÉ (ex-Productivité — sections par canal) ================= -->
 <section id="p5" class="page">
   <div class="toolbar">
     <div class="src" id="w5Src"></div>
@@ -279,35 +352,11 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   </div>
 </section>
 
-<!-- ================= P8 : PLANIFICATION (feuille Planning — personnes par jour & créneaux 30 min) ================= -->
-<section id="p8" class="page">
-  <div class="toolbar">
-    <div class="grp"><label>Vue créneaux</label><select id="w8V">
-      <option value="moy" selected>Moyenne période</option><option value="jour">Jour précis</option></select></div>
-    <div class="grp"><label>Jour (créneaux)</label><input type="date" id="w8D"></div>
-    <div class="src" id="w8Src"></div>
-  </div>
-  <div id="p8body">
-    <div class="kpis" id="k8"></div>
-    <div class="grid2">
-      <div class="card"><h3>1 · Personnes planifiées par jour — prod &amp; FIM hors prod</h3><div class="charthold"><canvas id="c8a"></canvas></div></div>
-      <div class="card"><h3>2 · Personnes planifiées par créneau 30 min</h3><div class="charthold"><canvas id="c8b"></canvas></div></div>
-    </div>
-    <div class="card"><h3>3 · Heures par jour — planifiées (HP) · Heures de log · FIM</h3><div class="charthold tall"><canvas id="c8c"></canvas></div></div>
-    <div class="card"><h3>Détail par jour</h3><div class="tblwrap"><table id="t8"></table></div>
-      <p class="hint" id="h8"></p></div>
-    <div class="card"><h3>Matrice — personnes planifiées (prod) par créneau 30 min</h3><div class="tblwrap"><table id="t8m"></table></div></div>
-  </div>
-  <div class="card empty" id="p8empty" style="display:none">
-    <b>Aucune planification.</b><br>Importez le classeur Planning (.xlsx, feuille <code>Planning</code> — Statut, Nice IEX, Shift In/Out,
-    Pause repas, HP, Total FIM) via le bouton <b>Importer</b> : personnes planifiées par jour et par créneau 30 min,
-    hors FIM (hors prod) et hors pause repas. Les données du fichier du 01/11 au 10/11/2026 sont préchargées.
-  </div>
-</section>
-
 </main>
 
-<footer class="pfoot">Sources : modèle RM (.xlsm — besoin &amp; capacité, SLA/QE, DMT, occupation, absentéisme, congés) · Prévision Webhelp (prévus mensuels + poids journaliers &amp; créneaux 30 min) · Capacitaire (DAILY VISION) · Planning heures (date · activité · heures) · Planification (feuille Planning — agents par jour &amp; créneaux) · Réalisé (DRM) · DMT (Export Vonage Call) · Mail (Export Mail + Prévision Mail) — les données importées restent dans ce navigateur ; utilisez « Exporter » pour produire le data.json de déploiement.</footer>
+<footer class="pfoot">Sources : modèle RM (.xlsm — besoin &amp; capacité, SLA/QE, DMT, occupation, absentéisme, congés — capa répartie par jour / créneau selon les poids de la prévision) ·
+Prévision Webhelp (prévus mensuels + poids journaliers &amp; créneaux 30 min) · Données DASHBOARD CAPA AUCHAN (feuille Planning = heures planifiées par agent, feuille Skills = répartition par activité et canal,
+EXT_Agent = heures de log réalisées, EXT_Entrant / EXT_Email = actes réalisés) — les données importées restent dans ce navigateur ; utilisez « Exporter » pour produire le data.json de déploiement.</footer>
 
 <!-- ================= DIALOG IMPORT ================= -->
 <dialog id="imp">
@@ -315,57 +364,30 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   <div class="dlgbody">
     <div class="impgrid">
       <div class="imp"><b>Roadmap — modèle RM (S46+)</b>
-        <p>Classeur .xlsm / .xlsx, onglet <code>AUCHAN</code> (sections Besoin / Capa / Effectif / SLA · QE / DMT / Occupation / Absentéisme / Congés). Alimente les 9 blocs de l'onglet Roadmap.</p>
+        <p>Classeur .xlsm / .xlsx, onglet <code>AUCHAN</code> (sections Besoin / Capa / Effectif / SLA · QE / DMT / Occupation / Absentéisme / Congés). Alimente les 3 vues de l'onglet Roadmap.</p>
         <label>Choisir le fichier<input type="file" id="fRoad" accept=".xlsm,.xlsx,.xls"></label>
         <span class="st" id="stRoad"></span></div>
-      <div class="imp"><b>ETP prévus</b>
-        <p>Colonnes <code>semaine (S42, 42 ou une date) · activité · etp</code>. Optionnel : le modèle RM contient déjà le besoin en ETP. Complète l'onglet Roadmap.</p>
-        <label>Choisir le fichier<input type="file" id="fEtp" accept=".xlsx,.xls,.csv"></label>
-        <span class="st" id="stEtp"></span></div>
-      <div class="imp"><b>Capacitaire</b>
-        <p>Classeur .xlsx, onglet <code>DAILY VISION</code> (dates ligne 15, lignes « Capacitaire en actes » et « Capacitaire en heures » si présentes).</p>
-        <label>Choisir le fichier<input type="file" id="fCapa" accept=".xlsx,.xlsm,.xls"></label>
-        <span class="st" id="stCapa"></span></div>
-      <div class="imp"><b>Planning — heures planifiées</b>
-        <p>Synthèse quotidienne : colonnes <code>date · activité · heures</code> (l'activité peut être « Hyper », « Voix Hyper »…). Alimente la répartition par activité du capa réel dans l'onglet « Analyse capa » et le taux d'occupation.</p>
-        <label>Choisir le fichier<input type="file" id="fPlan" accept=".xlsx,.xls,.csv"></label>
-        <span class="st" id="stPlan"></span></div>
-      <div class="imp"><b>Réalisé — DRM</b>
-        <p>DRM mensuel, table journalière <code>SEMAINE / JOUR / DATE</code> + groupes <code>Traités · Reçus · Traités 60s</code> × flux. Les mois s'additionnent à chaque import.</p>
-        <label>Choisir le fichier<input type="file" id="fReal" accept=".xlsx,.xlsm,.xls"></label>
-        <span class="st" id="stReal"></span></div>
-      <div class="imp"><b>DMT — Export Vonage Call (nouveau)</b>
-        <p>Une ligne par appel : <code>Compétence · Répondu · After Call Work Time · Durée de communication · Date de création</code>. DMT = (communication + after-call) ÷ appels répondus, par jour et par activité. Colonne <code>SLA-50</code> optionnelle : alimente « Perdus file -50s » de l'onglet Mail.</p>
-        <label>Choisir le fichier<input type="file" id="fDmt" accept=".xlsx,.xls"></label>
-        <span class="st" id="stDmt"></span></div>
-      <div class="imp"><b>Mail — Export Mail (nouveau)</b>
-        <p>Une ligne par courriel : <code>Personnalisé · Statut · Délai de traitement · Date d'acceptation</code>. Statut 1 = traité. QS, QP, QS &lt; 60 s, QE, T/P + heures de traitement et DMT (secondes), par jour et par activité. Même jour/activité = valeur remplacée.</p>
-        <label>Choisir le fichier<input type="file" id="fMail" accept=".xlsx,.xls"></label>
-        <span class="st" id="stMail"></span></div>
-      <div class="imp"><b>Prévision Mail</b>
-        <p>Colonnes <code>date · flux · prevu</code> (ou « prévision »). Alimente QP, T/P et QE de l'onglet Productivité (canal Mail).</p>
-        <label>Choisir le fichier<input type="file" id="fPmail" accept=".xlsx,.xls,.csv"></label>
-        <span class="st" id="stPmail"></span></div>
-      <div class="imp"><b>Planification — agents &amp; créneaux (nouveau)</b>
-        <p>Classeur .xlsx, feuille <code>Planning</code> (une ligne = agent × jour : Statut, Nice IEX, Shift In/Out, Pause repas, HP, Total FIM).
-        Calcule les personnes planifiées par jour et par créneau 30 min — hors FIM (hors prod) et hors pause repas. Alimente l'onglet Planification.</p>
-        <label>Choisir le fichier<input type="file" id="fPlanA" accept=".xlsx,.xlsm,.xls"></label>
-        <span class="st" id="stPlanA"></span></div>
-      <div class="imp"><b>Prévision Webhelp — jour &amp; 30 min (nouveau)</b>
+      <div class="imp"><b>Prévision Webhelp — jour &amp; 30 min</b>
         <p>Classeur .xlsx : onglet <code>2026</code> (prévus mensuels par flux) + onglet <code>Poids</code> (poids journaliers,
-        poids par jour de semaine et créneaux 30 min — colonne R, format 730 = 07:30). Alimente les vues par jour
-        et par créneau de l'onglet Prévision.</p>
+        poids par jour de semaine et créneaux 30 min — colonne R, format 730 = 07:30). Sert à la répartition journalière
+        et par créneau du capacitaire (onglet Roadmap).</p>
         <label>Choisir le fichier<input type="file" id="fPrev" accept=".xlsx,.xlsm,.xls"></label>
         <span class="st" id="stPrev"></span></div>
+      <div class="imp" style="grid-column:1/-1"><b>Données DASHBOARD CAPA AUCHAN — planification &amp; réalisation</b>
+        <p>Classeur .xlsx : feuille <code>Planning</code> (une ligne = agent × jour : Statut, Shift In/Out, Pause repas, HP, Total FIM),
+        feuille <code>Skills</code> (compétences : HYPER/DRIVE 50/50 sur les 2 activités et les canaux MAIL/PHONE · ALL toutes activités et canaux ·
+        SAV sur PHONE · CHAT sur CHAT), feuilles <code>EXT_Agent</code> (heures de log réalisées), <code>EXT_Entrant</code> (appels : réalisés + DMT)
+        et <code>EXT_Email</code> (courriels). Alimente les onglets Planification, Analyse capa et Analyse réalisé.</p>
+        <label>Choisir le fichier<input type="file" id="fDash" accept=".xlsx,.xlsm,.xls"></label>
+        <span class="st" id="stDash"></span></div>
     </div>
   </div>
   <div class="dlgfoot">
-    <button class="btn" id="bModele">Modèle planning (.xlsx)</button>
     <span class="spacer"></span>
     <button class="btn" id="bDemo2">Charger la démo</button>
     <button class="btn pri" id="bExp2">Exporter data.json</button>
   </div>
-  <p class="dlgnote">Chaque import est fusionné aux données en cours (même date / même flux = valeur remplacée), puis conservé dans ce navigateur. « Exporter » produit le <code>data.json</code> à déposer dans le dépôt GitHub.</p>
+  <p class="dlgnote">Chaque import est fusionné aux données en cours (même date / même activité = valeur remplacée), puis conservé dans ce navigateur. « Exporter » produit le <code>data.json</code> à déposer dans le dépôt GitHub.</p>
 </dialog>
 
 <script src="js/app.js"></script>
