@@ -11,7 +11,7 @@ Déploiement : Cloudflare Workers (déploiement manuel par upload d'assets).
 | `js/app.js` | Logique applicative (données, imports, répartition Skills, graphiques, filtres globaux) |
 | `data/roadmap.json` | **Onglet Roadmap** : modèle RM complet — 21 sections × 12 activités × 113 semaines |
 | `data/prevision.json` | **Prévision Webhelp** : prévus mensuels (12 mois × 6 flux) + poids journaliers + créneaux 30 min (profils Lundi-samedi / Dimanche) — sert à répartir le capacitaire par jour et par créneau |
-| `data/dashcapa.json` | **Données DASHBOARD CAPA AUCHAN** : feuille Planning (heures planifiées, 10 jours × 80 agents + lignes brutes), feuille Skills (60 compétences), EXT_Agent (heures de log réalisées), EXT_Entrant (réalisé voix + DMT), EXT_Email (réalisé mail) |
+| `data/dashcapa.json` | **Données DASHBOARD CAPA AUCHAN** : feuille Planning (heures planifiées, allaitement, 10 jours × 80 agents + lignes brutes), feuille Skills (60 compétences), EXT_Agent (heures de log réalisées), EXT_Entrant (réalisé voix + DMT), EXT_Email (réalisé mail) |
 | `data/data.json` | Métadonnées (dates de mise à jour et noms de fichiers) |
 | `favicon.svg` | Icône de l'outil (onglet navigateur) |
 | `_headers` | Cloudflare : pas de cache (mises à jour toujours visibles) |
@@ -50,19 +50,20 @@ filtres de période).
      répartie par créneaux 30 min selon les **poids créneaux** de la prévision (profil
      « Lundi au samedi » / « Dimanche ») — actes, heures, ETP à la pointe, QE.
 
-2. **Planification** — 2 sous-onglets. Les heures planifiées (feuille `Planning`, hors FIM et
-   hors pause repas) sont réparties par activité × canal selon la feuille `Skills` :
+2. **Planification** — 2 sous-onglets. La capa en heures de contrat (effectif planifié hors FIM
+   × 8 h/jour, 7 h si allaitement — colonne « Allaitement » du `Planning`) est répartie par
+   activité × canal selon la feuille `Skills` :
    - **HYPER/DRIVE** → 50/50 sur les activités Hyper et Drive × 50/50 sur les canaux MAIL et PHONE ;
    - **ALL** (LOT UNIQUE) → toutes les activités et tous les canaux (répartition uniforme) ;
    - **SAV** → mono-compétence sur le PHONE · **CHAT** (LOT 4) → mono-compétence sur le CHAT.
-   - **Vue journalière** : heures par activité par jour + personnes planifiées (prod / FIM) +
-     heures de log réalisées (EXT_Agent : Busy, Wrap Up, Hold, Chat, Panier — hors agents FIM).
-   - **Vue par créneaux** : personnes et heures par créneau 30 min + matrice créneau × activité.
+   - **Vue journalière** : capa contrat par activité par jour + effectif planifié (prod / FIM /
+     allaitement) + heures de log réalisées (EXT_Agent : Busy, Wrap Up, Hold, Chat, Panier — hors agents FIM).
+   - **Vue par créneaux** : personnes et heures de contrat par créneau 30 min + matrice créneau × activité.
 
 3. **Analyse capa** — **capa roadmap vs capa planif** (l'ancien « réalisé » a été retiré) :
    - capa roadmap = capa hebdo du modèle RM répartie par jour (poids prévision) ;
-   - capa planif = heures planifiées hors FIM × (1 − absentéisme RM) → actes = heures de log
-     × **productivité du modèle RM** (par activité **et par canal** : `Mail Hyper` / `Mail AFR` /
+   - capa planif = **capa en heures de contrat** hors FIM × (1 − absentéisme RM) → actes = capa
+     heures × **productivité du modèle RM** (par activité **et par canal** : `Mail Hyper` / `Mail AFR` /
      `Mail Drive` pour le canal MAIL, `Direct (LAD)` pour Direct, etc.) ;
    - **seuls les jours couverts par la planification sont analysés** (les jours sans planif sont
      exclus pour ne pas fausser les écarts).
@@ -75,9 +76,19 @@ filtres de période).
   la sauvegarde échouait en silence (cause des pertes constatées). L'entête affiche l'état
   (« Sauvegarde locale active » / « Sauvegardé à HH:MM » / « ⚠ Sauvegarde impossible »).
   « Réinitialiser » efface IndexedDB + localStorage et recharge les données préchargées.
-- **Capa planif et productivité du roadmap** — la conversion « heures de log → actes » de la
-  capa planif utilise les hypothèses de productivité **du modèle RM** (section `Productivité`,
-  valeur hebdomadaire de la semaine concernée), avec la clé exacte par activité et canal.
+- **Capa en heures de contrat (Planification)** — la capa en heures n'est plus la présence
+  du fichier : elle vaut **effectif planifié hors FIM × heure contrat** (8 h/jour · 40 h/semaine,
+  **7 h si allaitement** — colonne « Allaitement » du Planning). Ces heures de contrat sont
+  ramenées sur la présence [Shift In, Shift Out) − pause repas au prorata des créneaux, puis
+  réparties par activité × canal selon la feuille Skills (Σ créneaux = Σ activités = capa
+  contrat du jour). KPI « Capa en heures (contrat) », colonnes « Allait. » et
+  « Capa contrat (h) » du tableau journalier, ligne « Capa contrat (effectif × 8 h) » du
+  graphique, et sous-onglet créneaux cohérent.
+- **Capa planif et productivité du roadmap** — la capa planif (onglet Analyse capa) est
+  calculée sur ces **heures de contrat** : capa heures × (1 − absentéisme RM) × productivité
+  **du modèle RM** (section `Productivité`, valeur hebdomadaire de la semaine concernée),
+  avec la clé exacte par activité et canal ; les hypothèses manuelles ci-dessous restent
+  prioritaires.
 - **Hypothèses de productivité manuelles** (onglet Analyse capa, section « Hypothèses de
   productivité — actes / heure ») — une ligne par activité × canal ; la valeur RM courante est
   affichée sous chaque champ. Saisir une valeur **remplace** l'hypothèse RM (badge

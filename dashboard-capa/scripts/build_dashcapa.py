@@ -10,10 +10,10 @@ Génère work/app/data/dashcapa.json depuis « Données DASHBOARD CAPA AUCHAN.xl
 Met aussi à jour data/meta dans data.json.
 Cette script est la RÉFÉRENCE de la logique implémentée ensuite en JS (impDashCapa).
 """
-import openpyxl, json, re, datetime
+import openpyxl, json, re, datetime, sys
 from collections import OrderedDict
 
-SRC = "Données DASHBOARD CAPA AUCHAN.xlsx (fichier source à côté du script)"
+SRC = sys.argv[1] if len(sys.argv) > 1 else "Données DASHBOARD CAPA AUCHAN.xlsx (fichier source à côté du script)"
 OUT = "../data/dashcapa.json"
 DATA = "../data/data.json"
 
@@ -127,6 +127,7 @@ def col(nm, alts=()):
 cD, cSt, cAg, cCp, cWd = col('date'), col('statut'), col('log vonage', ['agent']), col('competences'), col('workday')
 cSI, cSO = col('shift in', ['debut de shift']), col('fin de shift', ['shift out'])
 cR1, cR2, cHP, cFm = col('debut pause repas'), col('fin pause repas'), col('hp'), col('total fim')
+cAl = col('allaitement')
 
 rows_all, prod_rows = [], []
 for row in ws.iter_rows(min_row=2, max_col=25, values_only=True):
@@ -145,9 +146,10 @@ for row in ws.iter_rows(min_row=2, max_col=25, values_only=True):
          (skills_by.get('io:' + mio.group(0)) if mio else None) and skills_by['io:' + mio.group(0)]['sk'] or \
          lot_to_skill(comp)
     fimrow = comp == 'fim' or (fim > 0 and hp > 0 and fim >= hp - 0.01)
+    al = thrs(row[cAl] if cAl >= 0 else 0)
     r = {'d': d, 'ag': ag, 'wd': wd, 'lot': comp, 'sk': sk, 'fimrow': fimrow,
          'sin': sin, 'sout': sout, 'r1': tmin(row[cR1] if cR1 >= 0 else None),
-         'r2': tmin(row[cR2] if cR2 >= 0 else None), 'hp': r2(hp), 'fim': r2(fim)}
+         'r2': tmin(row[cR2] if cR2 >= 0 else None), 'hp': r2(hp), 'fim': r2(fim), 'al': r2(al)}
     rows_all.append(r)
     if not fimrow: prod_rows.append(r)
 
@@ -163,12 +165,16 @@ for r in pr: by.setdefault(r['d'], []).append(r)
 m, day = {'prod': {}, 'fim': {}, 'pres': {}}, {}
 for d in dates:
     prod = [0.0] * len(slots); fim = [0.0] * len(slots); pres = [0.0] * len(slots)
-    hp = fimh = rep = 0.0; n = nf = 0; ags = []
+    hp = fimh = rep = ctr = 0.0; n = nf = nctr = nal = 0; ags = []
     for r in by[d]:
         has_rep = r['r1'] is not None and r['r2'] is not None and r['r2'] > r['r1']
         rep += (ov(r['r1'], r['r2'], 0, 1440) / 60) if has_rep else 0
         hp += r['hp']; fimh += r['fim']; n += 1; ags.append(r['ag'])
         if r['fimrow']: nf += 1
+        else:
+            al = r.get('al') or 0
+            nctr += 1; ctr += max(0, 8 - al)   # heure contrat : 8 h/jour, 7 h si allaitement
+            if al > 0: nal += 1
         for i, s in enumerate(slots):
             x = ov(s, s + 30, r['sin'], r['sout']) - (ov(s, s + 30, r['r1'], r['r2']) if has_rep else 0)
             if x <= 0: continue
@@ -178,7 +184,7 @@ for d in dates:
             else: prod[i] += w
     m['prod'][d] = [r3(v) for v in prod]; m['fim'][d] = [r3(v) for v in fim]; m['pres'][d] = [r3(v) for v in pres]
     day[d] = {'plan': n, 'fim': nf, 'hp': r2(hp), 'hprod': r2(max(0, hp - fimh)), 'fimh': r2(fimh),
-              'repas': r2(rep), 'ag': ags}
+              'repas': r2(rep), 'nctr': nctr, 'ctr': r2(ctr), 'nal': nal, 'ag': ags}
 plan = {'meta': {'file': 'Données DASHBOARD CAPA AUCHAN.xlsx', 'maj': TODAY,
                  'agents': len(set(r['ag'] for r in pr))},
         'dates': dates, 'slots': [slot_lab(t) for t in slots], 'm': m, 'day': day,
@@ -186,6 +192,8 @@ plan = {'meta': {'file': 'Données DASHBOARD CAPA AUCHAN.xlsx', 'maj': TODAY,
 fim_agents = set(r['ag'] for r in pr if r['fimrow'])
 print('Planning :', len(dates), 'jours', len(slots), 'créneaux', len(set(r['ag'] for r in pr)), 'agents',
       '| HP Σ =', r2(sum(day[d]['hp'] for d in dates)), 'h | hors FIM =', r2(sum(day[d]['hprod'] for d in dates)), 'h',
+      '| capa contrat (hors FIM, 8 h/j · 7 h allait.) =', r2(sum(day[d]['ctr'] for d in dates)), 'h',
+      '| allaitement =', sum(day[d]['nal'] for d in dates), 'lignes',
       '| agents FIM exclus du réalisé :', len(fim_agents))
 
 # ================= EXT_AGENT -> logR =================

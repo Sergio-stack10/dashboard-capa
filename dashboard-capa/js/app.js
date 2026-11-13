@@ -651,6 +651,8 @@ function buildRoadmapCompat() {                                   // D.roadmap v
    recouvrement [Shift In, Shift Out) − recouvrement [Pause repas).
    FIM (Compétences = FIM ou Total FIM ≥ HP) = personnes hors prod : comptées à part, 0 en prod.
    HP du fichier = shift − pause repas ; Heures de log = HP − Total FIM.
+   Capa en heures (contrat) = effectif planifié hors FIM × heure contrat
+   (8 h/jour · 40 h/semaine, 7 h si allaitement) — cf. day[].ctr / buildPlanExtras.
    Répartition par activité × canal : cf. buildPlanExtras (feuille Skills). */
 function tMin(v) {                                   // valeur temps -> minutes (float) ou null
   if (v == null || v === '') return null;
@@ -681,12 +683,13 @@ function planAgg(rows) {                             // agrégation -> matrice d
   const m = { prod: {}, fim: {}, pres: {} }, day = {};
   dates.forEach(d => {
     const prod = slots.map(() => 0), fim = slots.map(() => 0), pres = slots.map(() => 0);
-    let hp = 0, fimh = 0, rep = 0, n = 0, nF = 0; const ags = [];
+    let hp = 0, fimh = 0, rep = 0, n = 0, nF = 0, nctr = 0, ctr = 0, nal = 0; const ags = [];
     by[d].forEach(r => {
       const hasRep = r.r1 != null && r.r2 != null && r.r2 > r.r1;
       const repM = hasRep ? ovMin(r.r1, r.r2, 0, 1440) : 0;
       rep += repM / 60; hp += r.hp; fimh += r.fim; n++; ags.push(r.ag);
       if (r.fimrow) nF++;
+      else { const al = r.al || 0; nctr++; ctr += Math.max(0, 8 - al); if (al > 0) nal++; }
       slots.forEach((s, i) => {
         const x = ovMin(s, s + 30, r.sin, r.sout) - (hasRep ? ovMin(s, s + 30, r.r1, r.r2) : 0);
         if (x <= 0) return;
@@ -699,7 +702,7 @@ function planAgg(rows) {                             // agrégation -> matrice d
     m.fim[d]  = fim.map(v => Math.round(v * 1000) / 1000);
     m.pres[d] = pres.map(v => Math.round(v * 1000) / 1000);
     day[d] = { plan: n, fim: nF, hp: r2d(hp), hprod: r2d(Math.max(0, hp - fimh)),
-               fimh: r2d(fimh), repas: r2d(rep), ag: ags };
+               fimh: r2d(fimh), repas: r2d(rep), nctr, ctr: r2d(ctr), nal, ag: ags };
   });
   return { meta: { agents: new Set(pr.map(r => r.ag)).size }, dates,
            slots: slots.map(t => slotLab(Math.floor(t / 60) * 100 + t % 60)), m, day };
@@ -751,10 +754,12 @@ function slotMin(lab) {                              // '07:30' -> 450
   return slotMinCache[lab] = m ? +m[1] * 60 + +m[2] : 0;
 }
 
-/* ---- Répartition des heures planifiées par activité × canal (skills) ----
+/* ---- Répartition de la capa en heures de contrat par activité × canal (skills) ----
    Génère plan.byAct {date -> {'Act|CANAL' -> h}}, plan.byActSlot {date -> {'Act|CANAL' -> [h/créneau]}}
    et D.planH (heures par activité, canaux fusionnés — f — et par act|canal — fc)
-   à partir des lignes planifiées hors FIM (plan.rows). */
+   à partir des lignes planifiées hors FIM (plan.rows).
+   Heures = heure de contrat (8 h/jour, 7 h si allaitement) ramenée sur la
+   présence [Shift In, Shift Out) − pause repas, au prorata des créneaux. */
 function buildPlanExtras() {
   const P = D.plan; if (!P || !P.rows) return;
   const combos = new Map();
@@ -766,18 +771,31 @@ function buildPlanExtras() {
     if (!w.length) return;
     const d = r.d;
     byAct[d] = byAct[d] || {}; byActSlot[d] = byActSlot[d] || {};
-    slotMins.forEach((s0, si) => {
+    const ctr = Math.max(0, 8 - (r.al || 0));      // heure contrat : 8 h/jour, 7 h si allaitement
+    const sh = slotMins.map((s0, si) => {          // heures de présence du créneau
       let x = ovMin(s0, s0 + 30, r.sin, r.sout);
       if (r.r1 != null && r.r2 != null && r.r2 > r.r1) x -= ovMin(s0, s0 + 30, r.r1, r.r2);
-      if (x <= 0) return;
-      const h = x / 60;                              // heures de présence du créneau
+      return x > 0 ? x / 60 : 0;
+    });
+    const presH = sh.reduce((a, b) => a + b, 0);
+    if (presH <= 0 || ctr <= 0) return;            // ligne sans présence exploitable
+    const kC = ctr / presH;                        // présence ramenée aux heures de contrat
+    slotMins.forEach((s0, si) => {
+      const h = sh[si] * kC;                       // heures de contrat du créneau (Σ = ctr)
+      if (!h) return;
       w.forEach(([a, c, share]) => {
         const k = a + '|' + c; combos.set(k, { a, c });
-        byAct[d][k] = Math.round(((byAct[d][k] || 0) + h * share) * 1000) / 1000;
+        byAct[d][k] = (byAct[d][k] || 0) + h * share;          // accumulation brute (arrondi final ci-dessous)
         (byActSlot[d][k] = byActSlot[d][k] || Array(P.slots.length).fill(0))[si] += h * share;
       });
     });
   });
+  /* arrondi final — jamais à chaque pas (l'arrondi par accumulation fausse les sommes :
+     16 créneaux × 0.0454545 arrondis pas à pas donnent 0.720 au lieu de 0.727) */
+  Object.values(byAct).forEach(m => { for (const k in m) m[k] = Math.round(m[k] * 1000) / 1000; });
+  Object.values(byActSlot).forEach(m => { for (const k in m) {
+    const arr = m[k]; for (let i = 0; i < arr.length; i++) if (arr[i]) arr[i] = Math.round(arr[i] * 1000) / 1000;
+  } });
   P.acts = [...combos.keys()];
   P.byAct = byAct; P.byActSlot = byActSlot;
   const PH = D.planH = { file: (P.meta && P.meta.file) || '', maj: (P.meta && P.meta.maj) || '',
@@ -788,11 +806,12 @@ function buildPlanExtras() {
   P.dates.forEach((d, di) => {
     Object.entries(byAct[d] || {}).forEach(([k, h]) => {
       const a = k.split('|')[0];
-      PH.f[a][di] = Math.round(((PH.f[a][di] || 0) + h) * 1000) / 1000;
+      PH.f[a][di] = (PH.f[a][di] || 0) + h;            // accumulation brute, arrondi à la fin
       PH.fc[k] = PH.fc[k] || Array(PH.dates.length).fill(0);
       PH.fc[k][di] = h;
     });
   });
+  Object.keys(PH.f).forEach(a => { const arr = PH.f[a]; for (let i = 0; i < arr.length; i++) if (arr[i]) arr[i] = Math.round(arr[i] * 1000) / 1000; });
 }
 
 /* ---- Import « Données DASHBOARD CAPA AUCHAN » (.xlsx) ----
@@ -833,7 +852,7 @@ function impDashCapa(name, buf) {
   const cD = col('date'), cSt = col('statut'), cAg = col('log vonage', ['agent', 'noms']),
     cCp = col('competences'), cWd = col('workday'), cSI = col('shift in', ['debut de shift']),
     cSO = col('fin de shift', ['shift out']), cR1 = col('debut pause repas'), cR2 = col('fin pause repas'),
-    cHP = col('hp'), cFm = col('total fim');
+    cHP = col('hp'), cFm = col('total fim'), cAl = col('allaitement');
   if (cD < 0 || cSt < 0 || cSI < 0 || cSO < 0) throw new Error('Colonnes Statut / date / Shift In / Shift Out introuvables');
   const rows = [], prodRows = [], fimAgs = new Set();
   for (let i = hi + 1; i < aP.length; i++) {
@@ -847,7 +866,8 @@ function impDashCapa(name, buf) {
     const row = { ok: true, d, ag: String(cAg >= 0 ? (r[cAg] ?? '') : ''),
       wd: cWd >= 0 ? String(r[cWd] ?? '').trim() : '', lot: comp,
       fimrow: comp === 'fim' || (fim > 0 && hp > 0 && fim >= hp - 0.01),
-      sin, sout, r1: tMin(cR1 >= 0 ? r[cR1] : null), r2: tMin(cR2 >= 0 ? r[cR2] : null), hp: r2d(hp), fim: r2d(fim) };
+      sin, sout, r1: tMin(cR1 >= 0 ? r[cR1] : null), r2: tMin(cR2 >= 0 ? r[cR2] : null),
+      hp: r2d(hp), fim: r2d(fim), al: cAl >= 0 ? r2d(tHrs(r[cAl])) : 0 };
     rows.push(row);
     if (row.fimrow) fimAgs.add(row.ag); else prodRows.push(row);
   }
@@ -2104,9 +2124,11 @@ function renderProdEd() {                           // hypothèses de productivi
    P3 — ANALYSE CAPA (capa roadmap vs planif)
    Capa roadmap : modèle RM (capa en actes / heures de log) répartie par jour
                   selon les poids de la prévision — cf. rmDaily (onglet Roadmap).
-   Capa planif  : Données DASHBOARD CAPA (feuille Planning + Skills) — heures
-                  planifiées hors FIM × (1 − absentéisme RM) → actes planifiés
-                  = heures de log × productivité (modèle RM, repli : hypothèses saisies).
+   Capa planif  : Données DASHBOARD CAPA (feuille Planning + Skills) — capa en
+                  heures de contrat = effectif planifié hors FIM × heure contrat
+                  (8 h/jour · 40 h/semaine, 7 h si allaitement) × (1 − absentéisme
+                  RM) → actes planifiés = capa heures × productivité (modèle RM,
+                  repli : hypothèses saisies).
    Les jours sans données de planification sont exclus de l'analyse
    (pas de faux écarts sur l'affichage).
    ===================================================================== */
@@ -2196,13 +2218,13 @@ function r3() {
   const HB = hpB.reduce((a, b) => a + b, 0);
   $('k3').innerHTML =
     kpi('Capa roadmap (actes)', fmt(Math.round(TP)), g + ' · ' + gfLbl() + ' · ' + allDays.length + ' j avec planif') +
-    kpi('Capa planif (actes)', fmt(Math.round(TL)), 'heures de log × productivité ' +
+    kpi('Capa planif (actes)', fmt(Math.round(TL)), 'capa heures contrat × productivité ' +
         (manA.size ? 'manuelle (' + [...manA].join(', ') + ')' : 'du modèle RM') +
         (noProd.size ? ' · manquante : ' + [...noProd].join(', ') : ''), TP ? Math.min(100, Math.abs(TL - TP) / TP * 100) : 0) +
     kpi('Écart (planif − roadmap)', fmt(Math.round(TL - TP)), TL - TP >= 0 ? 'sur-capacité' : 'sous-capacité',
         TP ? Math.min(100, Math.abs(TL - TP) / TP * 100) : 0) +
     kpi('Heures — roadmap / planif', fmt(Math.round(TH)) + ' / ' + fmt(Math.round(LH)),
-        pctS(LH, TH) + ' des heures roadmap · planifié hors FIM ' + fmt(Math.round(HB)) + ' h' +
+        pctS(LH, TH) + ' des heures roadmap · capa contrat (hors FIM) ' + fmt(Math.round(HB)) + ' h' +
         (noAbs.size ? ' · absentéisme RM indisponible (' + noAbs.size + ' j)' : ''));
   mkChart('c3a', { type: 'bar', data: { labels: keys, datasets: [
       { label: 'Capa roadmap (actes)', data: rd(pvA), backgroundColor: '#3b5bdb', borderRadius: 3 },
@@ -2213,14 +2235,14 @@ function r3() {
       scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisY('actes') } } });
   mkChart('c3b', { type: 'bar', data: { labels: keys, datasets: [
       { label: 'Capa roadmap (heures de log)', data: pvH.map(v => Math.round(v * 10) / 10), backgroundColor: '#7048e8', borderRadius: 3 },
-      { label: 'Capa planif (h log × (1 − abs))', data: plH.map(v => Math.round(v * 10) / 10), backgroundColor: '#1098ad', borderRadius: 3 },
-      { label: 'Planifié hors FIM (brut)', data: hpB.map(v => Math.round(v * 10) / 10), type: 'line', borderColor: '#868e96',
+      { label: 'Capa planif (h contrat × (1 − abs))', data: plH.map(v => Math.round(v * 10) / 10), backgroundColor: '#1098ad', borderRadius: 3 },
+      { label: 'Capa contrat (hors FIM)', data: hpB.map(v => Math.round(v * 10) / 10), type: 'line', borderColor: '#868e96',
         borderWidth: 2, pointRadius: 1.5, tension: .3, borderDash: [5, 3] }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' } },
       scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 16 } }, y: axisY('heures') } } });
   let h = '<thead><tr><th>Période</th><th>Capa roadmap (actes)</th><th>Capa planif (actes)</th><th>Écart actes</th><th>Couverture</th>' +
-    '<th>Capa roadmap (h)</th><th>Capa planif (h)</th><th>Planifié hors FIM (h)</th><th>Écart h</th></tr></thead><tbody>';
+    '<th>Capa roadmap (h)</th><th>Capa planif (h)</th><th>Capa contrat (h)</th><th>Écart h</th></tr></thead><tbody>';
   keys.forEach((k, i) => {
     const eA = plA[i] - pvA[i], eH = plH[i] - pvH[i];
     h += `<tr><td>${k}</td><td>${fmt(pvA[i])}</td><td>${fmt(plA[i])}</td>` +
@@ -2237,7 +2259,7 @@ function r3() {
   notes.push('Seuls les jours couverts par la planification sont analysés (' + allDays.length + ' j' +
     (g !== 'jour' ? ' · granularité ' + g : '') + ') — les jours sans planif sont exclus pour ne pas fausser les écarts.');
   notes.push('Capa roadmap = capa hebdomadaire du modèle RM répartie par jour selon les poids de la prévision (cf. onglet Roadmap).');
-  notes.push('Capa planif = heures planifiées hors FIM (feuille Planning, réparties par activité × canal selon la feuille Skills) × (1 − absentéisme RM) ; actes = heures de log × productivité du modèle RM (« Productivité » : Mail Hyper / Mail AFR pour le canal MAIL, Direct (LAD)…) — les hypothèses manuelles saisies ci-dessous sont prioritaires et sauvegardées automatiquement.');
+  notes.push('Capa planif = effectif planifié hors FIM × heure contrat (8 h/jour · 40 h/semaine, 7 h si allaitement — colonne « Allaitement » du Planning), ramené sur la présence et réparti par activité × canal selon la feuille Skills, × (1 − absentéisme RM) ; actes = capa heures × productivité du modèle RM (« Productivité » : Mail Hyper / Mail AFR pour le canal MAIL, Direct (LAD)…) — les hypothèses manuelles saisies ci-dessous sont prioritaires et sauvegardées automatiquement.');
   if (noAbs.size) notes.push('Absentéisme du modèle RM indisponible pour ' + noAbs.size + ' jour(s) — déduction non appliquée sur ces jours.');
   if (noProd.size) notes.push('Productivité manquante : ' + [...noProd].join(', ') + ' — renseignez les hypothèses de productivité ci-dessous (elles restent enregistrées après actualisation).');
   if (noHrs.size) notes.push('Heures roadmap converties via la productivité (section « capa en heures de log » absente pour : ' + [...noHrs].join(', ') + ').');
@@ -2249,14 +2271,14 @@ function r3() {
 
 /* =====================================================================
    P8 — PLANIFICATION (2 sous-onglets : journalière · créneaux 30 min)
-   Heures planifiées réparties par activité × canal selon la feuille Skills
-   (HYPER/DRIVE 50/50 × MAIL/PHONE · ALL toutes activités et canaux ·
+   Capa en heures de contrat répartie par activité × canal selon la feuille
+   Skills (HYPER/DRIVE 50/50 × MAIL/PHONE · ALL toutes activités et canaux ·
    SAV mono PHONE · CHAT mono CHAT) — cf. buildPlanExtras. Hors FIM.
-   Personnes planifiées en prod = présence [Shift In, Shift Out) − pause repas.
+   Contrat : 8 h/jour (40 h/semaine), 7 h si allaitement (colonne Planning).
+   Présence par créneau = [Shift In, Shift Out) − pause repas.
    ===================================================================== */
 function planEmpty() { return !D.plan || !D.plan.dates || !D.plan.dates.length; }
 const P8V = { view: 'jour' };
-function planEmpty() { return !D.plan || !D.plan.dates || !D.plan.dates.length; }
 function defSlotDay8() {                            // jour par défaut : le plus chargé
   const P = D.plan; if (!P || !P.dates || !P.dates.length) return;
   const cur = $('w8D').value;
@@ -2303,9 +2325,11 @@ function r8Jour() {
   const totPlan = days.reduce((s, d) => s + P.day[d].plan, 0);
   const totFimN = days.reduce((s, d) => s + P.day[d].fim, 0);
   const HP = days.reduce((s, d) => s + P.day[d].hp, 0);
-  const HPD = days.reduce((s, d) => s + P.day[d].hprod, 0);
   const FM = days.reduce((s, d) => s + P.day[d].fimh, 0);
   const RP = days.reduce((s, d) => s + P.day[d].repas, 0);
+  const ctrOf = d => P.day[d].ctr != null ? P.day[d].ctr : Math.max(0, P.day[d].plan - P.day[d].fim) * 8; // repli anciennes données
+  const CTR = days.reduce((s, d) => s + ctrOf(d), 0);
+  const NAL = days.reduce((s, d) => s + (P.day[d].nal || 0), 0);
   /* heures de log réalisées (EXT_Agent) */
   const L = D.logR;
   const logOf = d => { if (!L || !L.dates) return null; const i = L.dates.indexOf(d); return i >= 0 ? L.h.tot[i] : null; };
@@ -2320,15 +2344,17 @@ function r8Jour() {
     combos.forEach(k => { const a = k.split('|')[0]; if (hBy[a]) hBy[a][i] += BA[k] || 0; });
   });
   const sumRep = days.map((_, i) => actsU.reduce((s, a) => s + hBy[a][i], 0));
-  const iMax = HPD ? sumRep.indexOf(Math.max(...sumRep)) : 0;
+  const iMax = CTR ? sumRep.indexOf(Math.max(...sumRep)) : 0;
   const domA = actsU.length ? actsU.reduce((b, a) => hBy[a][iMax] > hBy[b][iMax] ? a : b, actsU[0]) : '—';
   $('k8').innerHTML =
     kpi('Agents planifiés', fmt(ags.size), days.length + ' jour(s) sur la période') +
-    kpi('Personnes planifiées / jour', fmt1(totPlan / days.length), 'dont FIM hors prod ' + fmt1(totFimN / days.length) + ' / j') +
-    kpi('Heures planifiées (HP)', fmt(Math.round(HP)) + ' h', 'hors pause repas ' + fmt(Math.round(RP)) + ' h') +
-    kpi('Heures de log (hors FIM)', fmt(Math.round(HPD)) + ' h', 'réparties sur ' + actsU.length + ' activité(s)') +
+    kpi('Effectif planifié / jour', fmt1(totPlan / days.length), 'dont FIM hors prod ' + fmt1(totFimN / days.length) + ' / j' +
+        (NAL ? ' · allaitement (7 h) : ' + fmt1(NAL / days.length) + ' / j' : '')) +
+    kpi('Capa en heures (contrat)', fmt(Math.round(CTR)) + ' h',
+        'effectif prod × 8 h/jour · 7 h si allaitement · réparties sur ' + actsU.length + ' activité(s)') +
+    kpi('Heures planifiées (HP)', fmt(Math.round(HP)) + ' h', 'présence − pause repas · hors pause ' + fmt(Math.round(RP)) + ' h') +
     (logAny ? kpi('Heures de log réalisées', fmt(Math.round(logTot)) + ' h', 'EXT_Agent — Busy · Wrap Up · Hold · Chat · Panier') : '') +
-    (HPD ? kpi('Activité dominante', domA, dShort(days[iMax]) + ' · ' + fmt1(hBy[domA] ? hBy[domA][iMax] : 0) + ' h') : '');
+    (CTR ? kpi('Activité dominante', domA, dShort(days[iMax]) + ' · ' + fmt1(hBy[domA] ? hBy[domA][iMax] : 0) + ' h') : '');
   /* graphique 1 : heures par activité (canaux fusionnés) + HP + log réalisé */
   const { keys, idx } = aggBy(days, g);
   const gN = keys.length, cnt = Array(gN).fill(0);
@@ -2337,13 +2363,16 @@ function r8Jour() {
   const div = a => a.map((v, i) => cnt[i] ? (isAvg ? v / cnt[i] : v) : v);
   const hByG = actsU.map(a => div(hBy[a].reduce((acc, v, j) => (acc[idx[j]] += v, acc), Array(gN).fill(0))));
   const hpG = div(days.reduce((acc, d, j) => (acc[idx[j]] += P.day[d].hp, acc), Array(gN).fill(0)));
+  const ctrG = div(days.reduce((acc, d, j) => (acc[idx[j]] += ctrOf(d), acc), Array(gN).fill(0)));
   const repG = div(sumRep.reduce((acc, v, j) => (acc[idx[j]] += v, acc), Array(gN).fill(0)));
   const logG = L && L.dates ? div(days.reduce((acc, d, j) => {
     const i = L.dates.indexOf(d); if (i >= 0) acc[idx[j]] += L.h.tot[i] || 0; return acc; }, Array(gN).fill(0))) : null;
   mkChart('c8a', { type: 'bar', data: { labels: keys, datasets: [
       ...hByG.map((a, i) => ({ label: actsU[i], data: a.map(v => Math.round(v * 10) / 10),
         backgroundColor: PAL[i % PAL.length], stack: 's', borderRadius: 2 })),
-      { label: 'HP (planifiées)', data: hpG.map(v => Math.round(v)), type: 'line', borderColor: '#1b2440',
+      { label: 'Capa contrat (effectif × 8 h)', data: ctrG.map(v => Math.round(v)), type: 'line', borderColor: '#f76707',
+        borderWidth: 2, pointRadius: 1.5, tension: .3, borderDash: [5, 3] },
+      { label: 'HP (présence − repas)', data: hpG.map(v => Math.round(v)), type: 'line', borderColor: '#1b2440',
         borderWidth: 2, pointRadius: 1.5, tension: .3 },
       ...(logAny ? [{ label: 'Heures de log réalisées', data: logG.map(v => Math.round(v)), type: 'line',
         borderColor: '#0ca678', borderWidth: 2, pointRadius: 1.5, tension: .3, borderDash: [5, 3] }] : [])] },
@@ -2364,27 +2393,31 @@ function r8Jour() {
       scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 16 } },
                 y: { stacked: true, beginAtZero: true, ...axisY('personnes') } } } });
   /* tableau détail par jour */
-  let h = '<thead><tr><th>Date</th><th>Jour</th><th>Planifiés</th><th>dont FIM</th><th>HP (h)</th>' +
+  let h = '<thead><tr><th>Date</th><th>Jour</th><th>Planifiés</th><th>dont FIM</th><th>Allait.</th><th>HP (h)</th><th>Capa contrat (h)</th>' +
     actsU.map(a => `<th>${a} (h)</th>`).join('') + '<th>Σ réparti (h)</th>' +
     (logAny ? '<th>Log réalisé (h)</th>' : '') + '<th>FIM (h)</th></tr></thead><tbody>';
   days.forEach((d, i) => {
     const D8 = P.day[d];
-    h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td><td>${D8.plan}</td><td>${D8.fim}</td><td>${fmt1(D8.hp)}</td>` +
+    h += `<tr><td>${dLab(d)}</td><td>${jJours(d)}</td><td>${D8.plan}</td><td>${D8.fim}</td><td>${D8.nal || 0}</td><td>${fmt1(D8.hp)}</td>` +
+      `<td><b>${fmt1(ctrOf(d))}</b></td>` +
       actsU.map(a => `<td>${hBy[a][i] ? fmt1(hBy[a][i]) : '·'}</td>`).join('') +
-      `<td><b>${fmt1(sumRep[i])}</b></td>` +
+      `<td>${fmt1(sumRep[i])}</td>` +
       (logAny ? `<td>${LOG[i] != null ? fmt1(LOG[i]) : '—'}</td>` : '') +
       `<td>${fmt1(D8.fimh)}</td></tr>`;
   });
   h += `</tbody><tfoot><tr><td colspan="2">Total période · moy. / jour</td><td>${fmt1(totPlan / days.length)} / j</td>` +
-       `<td>${fmt1(totFimN / days.length)} / j</td><td>${fmt(Math.round(HP))}</td>` +
+       `<td>${fmt1(totFimN / days.length)} / j</td><td>${fmt1(NAL / days.length)} / j</td><td>${fmt(Math.round(HP))}</td>` +
+       `<td>${fmt(Math.round(CTR))}</td>` +
        actsU.map(a => `<td>${fmt(Math.round(hBy[a].reduce((x, y) => x + y, 0)))}</td>`).join('') +
        `<td>${fmt(Math.round(sumRep.reduce((x, y) => x + y, 0)))}</td>` +
        (logAny ? `<td>${fmt(Math.round(logTot))}</td>` : '') +
        `<td>${fmt(Math.round(FM))}</td></tr></tfoot>`;
   $('t8').innerHTML = h;
-  $('h8').textContent = 'Répartition selon la feuille Skills : HYPER/DRIVE → 50/50 sur Hyper et Drive × 50/50 sur MAIL et PHONE · ' +
-    'ALL → toutes les activités et canaux (uniforme) · SAV → PHONE uniquement · CHAT → CHAT uniquement · FIM hors prod (exclu). ' +
-    'Heures = présence [Shift In, Shift Out) − pause repas · Heures de log réalisées = EXT_Agent (Busy, Wrap Up, Hold, Chat, Panier), hors agents FIM.';
+  $('h8').textContent = 'Capa en heures = effectif planifié hors FIM × heure contrat (8 h/jour · 40 h/semaine, 7 h si allaitement), ' +
+    'ramenée sur la présence [Shift In, Shift Out) − pause repas puis répartie selon la feuille Skills : ' +
+    'HYPER/DRIVE → 50/50 sur Hyper et Drive × 50/50 sur MAIL et PHONE · ALL → toutes les activités et canaux (uniforme) · ' +
+    'SAV → PHONE uniquement · CHAT → CHAT uniquement · FIM hors prod (exclu). ' +
+    'HP = présence − pause repas (info) · Heures de log réalisées = EXT_Agent (Busy, Wrap Up, Hold, Chat, Panier), hors agents FIM.';
   $('w8JSrc').textContent = 'Planification : ' + ((P.meta && P.meta.file) || 'importée') + ' · ' + days.length + ' j · ' +
     (D.skills && D.skills.by ? Object.keys(D.skills.by).filter(k => k.startsWith('wd:')).length + ' compétences' : 'compétences : lots du Planning') +
     ' · ' + gfLbl();
@@ -2430,7 +2463,8 @@ function r8Cre() {
     kpi('FIM hors prod à la pointe', fmt1(fimV[iP]), slots[iP]) +
     kpi('Heures / créneau', fmt1(totS[iHS]) + ' h', 'pointe à ' + slots[iHS] + ' · ' + lblC) +
     kpi('Activité dominante (pointe h)', domC, fmt1(hS[domC] ? hS[domC][iHS] : 0) + ' h à ' + slots[iHS]) +
-    kpi('Σ heures ' + lblC.toLowerCase(), fmt(Math.round(totH)) + ' h', (jourPrecis ? 'jour précis' : 'moy. / jour') + ' · ' + actsU.length + ' activité(s)');
+    kpi('Σ heures ' + lblC.toLowerCase(), fmt(Math.round(totH)) + ' h', (jourPrecis ? 'jour précis' : 'moy. / jour') +
+        ' · Σ créneaux = capa contrat (8 h/j, 7 h si allaitement)');
   mkChart('c8c', { type: 'bar', data: { labels: slots, datasets: [
       { label: 'Planifiés prod', data: vec.map(v => Math.round(v * 10) / 10), backgroundColor: '#3b5bdb', borderRadius: 2 },
       { label: 'FIM hors prod', data: fimV.map(v => Math.round(v * 10) / 10), backgroundColor: '#adb5bd', borderRadius: 2 }] },
@@ -2466,7 +2500,7 @@ function r8Cre() {
   hp += '</tbody>';
   $('t8p').innerHTML = hp;
   $('w8Src').textContent = 'Planification : ' + ((P.meta && P.meta.file) || 'importée') + ' · ' + lblC +
-    ' · ' + slots[0] + ' → ' + slots[slots.length - 1] + ' · répartition Skills' + (gfLbl() !== 'Total' ? ' · ' + gfLbl() : '');
+    ' · ' + slots[0] + ' → ' + slots[slots.length - 1] + ' · répartition Skills (heures de contrat)' + (gfLbl() !== 'Total' ? ' · ' + gfLbl() : '');
 }
 function bind8() {
   $('w8V').addEventListener('change', r8);
