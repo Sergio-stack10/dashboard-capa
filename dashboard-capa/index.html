@@ -46,6 +46,16 @@ nav.tabs .badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radi
 .prodgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
 .pitem label{display:block;font-size:11px;font-weight:700;color:var(--mut);margin-bottom:2px;text-transform:uppercase;letter-spacing:.4px}
 .pitem input{width:100%;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit}
+.psrc{display:block;font-size:10.5px;color:var(--mut);margin-top:3px}
+.psrc.man{color:#1971c2;font-weight:600}
+.psrc.none{color:#e8590c}
+.savest{font-size:11px;color:var(--mut);align-self:center;white-space:nowrap}
+.savest.err{color:#e03131;font-weight:700}
+.refbtn{margin-left:auto;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--card);color:var(--pri);font:inherit;font-weight:600;font-size:12px;padding:6px 13px;border-radius:8px;cursor:pointer;flex:none}
+.refbtn:hover{border-color:var(--pri)}
+.refbtn:disabled{opacity:.55;cursor:wait}
+.subtabs .refbtn{border-radius:8px;align-self:center;margin-bottom:6px}
+.toolbar .refbtn{padding:7px 13px}
 main{padding:0 20px 40px}
 section.page{display:none;padding-top:16px}
 section.page.on{display:block}
@@ -149,6 +159,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   <div class="brand"><h1>Dashboard capacitaire</h1><span class="sub">Roadmap Auchan</span></div>
   <div id="srcLine">Chargement des données…</div>
   <div class="top-actions">
+    <span class="savest" id="saveSt" title="Sauvegarde automatique locale (IndexedDB) — vos données et hypothèses restent après actualisation de la page"></span>
     <button class="btn pri" id="bImp">Importer</button>
     <button class="btn" id="bExp">Exporter</button>
     <button class="btn ghost" id="bDemo">Démo</button>
@@ -191,6 +202,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
     <button data-v="ann" class="on">Vue annuelle — par semaine</button>
     <button data-v="jour">Vue journalière</button>
     <button data-v="cre">Vue par créneaux</button>
+    <button type="button" class="refbtn" data-p="p1" title="Recharger les fichiers sources et réafficher cette page">↻ Actualiser</button>
   </div>
 
   <!-- filtres vue annuelle -->
@@ -278,6 +290,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   <div class="subtabs" id="p8subs" role="tablist">
     <button data-v="jour" class="on">Vue journalière</button>
     <button data-v="cre">Vue par créneaux</button>
+    <button type="button" class="refbtn" data-p="p8" title="Recharger les fichiers sources et réafficher cette page">↻ Actualiser</button>
   </div>
   <div class="subbar" id="p8fJour">
     <div class="src" id="w8JSrc"></div>
@@ -326,6 +339,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 <section id="p3" class="page">
   <div class="toolbar">
     <div class="src" id="w3Src"></div>
+    <button type="button" class="refbtn" data-p="p3" title="Recharger les fichiers sources et réafficher cette page">↻ Actualiser</button>
   </div>
   <div class="kpis" id="k3"></div>
   <div class="grid2">
@@ -334,8 +348,10 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   </div>
   <div class="card"><h3>Détail par période — uniquement les jours avec planification</h3><div class="tblwrap"><table id="t3"></table></div></div>
   <div class="card"><h3>Hypothèses de productivité — actes / heure</h3>
-    <p class="hint">Saisissez les actes traités par heure et par activité : elles convertissent les heures planifiées en actes planifiés
-    (capa planif) lorsque le modèle RM n'a pas la productivité. Le modèle RM (section « Productivité ») est utilisé en priorité.</p>
+    <p class="hint">La capa planif (actes) = heures de log × productivité. Par défaut, l'hypothèse du <b>modèle RM</b> est utilisée
+    (productivité par activité <b>et par canal</b> : Mail Hyper / Mail AFR pour le canal MAIL, Direct (LAD), etc. — valeur affichée sous chaque champ).
+    Saisissez une valeur pour <b>remplacer</b> l'hypothèse RM d'une activité : elle s'applique immédiatement et reste <b>sauvegardée automatiquement</b>
+    dans ce navigateur, même après actualisation de la page. Videz le champ pour revenir au modèle RM.</p>
     <div class="prodgrid" id="prodEd"></div>
   </div>
   <div class="card"><p class="hint" id="p3Hint"></p></div>
@@ -345,6 +361,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 <section id="p5" class="page">
   <div class="toolbar">
     <div class="src" id="w5Src"></div>
+    <button type="button" class="refbtn" data-p="p5" title="Recharger les fichiers sources et réafficher cette page">↻ Actualiser</button>
   </div>
   <div id="p5body"></div>
   <div class="card empty" id="p5empty" style="display:none">
@@ -387,7 +404,9 @@ EXT_Agent = heures de log réalisées, EXT_Entrant / EXT_Email = actes réalisé
     <button class="btn" id="bDemo2">Charger la démo</button>
     <button class="btn pri" id="bExp2">Exporter data.json</button>
   </div>
-  <p class="dlgnote">Chaque import est fusionné aux données en cours (même date / même activité = valeur remplacée), puis conservé dans ce navigateur. « Exporter » produit le <code>data.json</code> à déposer dans le dépôt GitHub.</p>
+  <p class="dlgnote">Chaque import est fusionné aux données en cours (même date / même activité = valeur remplacée), puis <b>sauvegardé automatiquement dans ce navigateur</b>
+  (IndexedDB, repli localStorage — vos données et vos hypothèses de productivité restent en place après actualisation ou fermeture de la page, même pour de gros fichiers).
+  « Exporter » produit le <code>data.json</code> à déposer dans le dépôt GitHub.</p>
 </dialog>
 
 <script src="js/app.js"></script>

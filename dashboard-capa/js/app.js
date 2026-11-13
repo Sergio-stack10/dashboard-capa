@@ -227,6 +227,46 @@ function prodOf(act) {                        // hypothèse de productivité act
   const v = D.prod ? D.prod.def[norm(act)] : null;
   return v > 0 ? v : null;
 }
+function rmProdKey(act, chan) {               // clé « Productivité » du modèle RM pour (activité, canal)
+  const s = norm(act);
+  let base = null;
+  if (s.includes('borne') || s.includes('lsa')) base = 'Borne/LSA';
+  else if (s.includes('chat')) base = 'Chat';
+  else for (const x in ACT_CAP) if (s.includes(x)) base = ACT_CAP[x];
+  if (!base) return String(act).trim();
+  if (norm(base) === 'direct') base = 'Direct (LAD)';            // libellé exact du RM
+  if (norm(chan) === 'mail' && !norm(base).startsWith('mail')) base = 'Mail ' + base;
+  return base;
+}
+function rmHypOf(act, chan) {                 // hypothèse RM moyenne (toutes semaines disponibles)
+  const S = D.rm2 && D.rm2.s && D.rm2.s.prod_h;
+  if (!S || !S.a) return null;
+  let arr = S.a[rmProdKey(act, chan)];
+  if (!arr && norm(chan) === 'mail') arr = S.a[rmProdKey(act, 'PHONE')];   // repli : productivité voix
+  if (!arr) return null;
+  const xs = arr.filter(v => v != null && v > 0);
+  return xs.length ? Math.round(xs.reduce((s, v) => s + v, 0) / xs.length * 10) / 10 : null;
+}
+function manProdOf(act, chan) {               // hypothèse manuelle enregistrée (clé RM|canal, act|canal ou act) ou null
+  const s = norm(act), c = norm(chan);
+  const tries = [norm(rmProdKey(act, chan)) + '|' + c, s + '|' + c, s];
+  for (const k of tries) { const v = D.prod.def[k]; if (v > 0) return v; }
+  return null;
+}
+function planProdOf(act, chan, wi) {          // capa planif : hypothèse manuelle > modèle RM > replis
+  const m = manProdOf(act, chan);
+  if (m != null) return m;
+  const S = D.rm2 && D.rm2.s && D.rm2.s.prod_h;
+  const key = rmProdKey(act, chan);
+  const x = S && S.a[key] ? S.a[key][wi] : null;
+  if (x != null) return x;
+  if (norm(chan) === 'mail') {                // repli : productivité voix de l'activité
+    const k2 = rmProdKey(act, 'PHONE');
+    const y = S && S.a[k2] ? S.a[k2][wi] : null;
+    if (y != null) return y;
+  }
+  return prodOf(act);
+}
 
 /* ---------- état ---------- */
 let D = null;                                        // données complètes
@@ -256,6 +296,7 @@ function ensure() {
   if (!D.planH) D.planH = { file: '', maj: '', dates: [], acts: [], f: {} };
   if (!D.etp) D.etp = { file: '', maj: '', rows: [] };
   if (!D.prod) D.prod = { file: '', def: {} };
+  if (!D.prod.def) D.prod.def = {};
   if (!D.real) D.real = emptyData().real;
   D.real.flows = RFLOW.slice();
   RFLOW.forEach(f => { if (!D.real.f[f]) D.real.f[f] = { t: [], r: [], s: [] }; });
@@ -267,7 +308,83 @@ function ensure() {
   if (D.skills === undefined) D.skills = null;
   if (D.logR === undefined) D.logR = null;
 }
-function save() { try { localStorage.setItem(LS, JSON.stringify(D)); } catch (e) { console.warn('localStorage', e); } }
+/* ---------- stockage persistant : IndexedDB (repli localStorage) ----------
+   localStorage est limité (~5 Mo) : avec les fichiers complets (RM + Prévision +
+   Planning sur plusieurs mois) la sauvegarde échouait en silence et les données
+   disparaissaient à l'actualisation. IndexedDB offre un quota bien supérieur ;
+   localStorage reste écrit en parallèle quand c'est possible (compatibilité). */
+const DBN = 'capaDB', DBS = 'state', DBK = 'capaData';
+let _idbP = null;
+function idb() {
+  if (_idbP !== null) return _idbP;
+  _idbP = new Promise((res, rej) => {
+    try {
+      const rq = indexedDB.open(DBN, 1);
+      rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains(DBS)) rq.result.createObjectStore(DBS); };
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => rej(rq.error);
+    } catch (e) { rej(e); }
+  }).catch(() => null);
+  return _idbP;
+}
+async function storeGet() {                          // chaîne JSON stockée, ou null
+  const db = await idb();
+  if (db) {
+    try {
+      return await new Promise((res, rej) => {
+        const rq = db.transaction(DBS, 'readonly').objectStore(DBS).get(DBK);
+        rq.onsuccess = () => res(rq.result || null);
+        rq.onerror = () => rej(rq.error);
+      });
+    } catch (e) { /* repli localStorage */ }
+  }
+  try { return localStorage.getItem(LS); } catch (e) { return null; }
+}
+async function storeDel() {
+  _saveGen++; _saveDirty = false;                    // annule toute sauvegarde en attente (course reset)
+  if (_saveT) { clearTimeout(_saveT); _saveT = null; }
+  const db = await idb();
+  if (db) { try { db.transaction(DBS, 'readwrite').objectStore(DBS).delete(DBK); } catch (e) {} }
+  try { localStorage.removeItem(LS); } catch (e) {}
+}
+let _saveT = null, _saveDirty = false, _saveGen = 0;
+function save() {                                    // sauvegarde automatique (débounce 200 ms)
+  _saveDirty = true;
+  if (_saveT) return;
+  const g = _saveGen;
+  _saveT = setTimeout(async () => {
+    _saveT = null;
+    if (g !== _saveGen || !_saveDirty) return;       // réinitialisation entre-temps : ne pas réécrire
+    _saveDirty = false;
+    await doSave();
+    if (g === _saveGen && _saveDirty) save();        // modifications pendant l'écriture
+  }, 200);
+}
+async function doSave() {
+  let ok = false;
+  try {
+    const json = JSON.stringify(D);
+    const db = await idb();
+    if (db) {
+      await new Promise((res, rej) => {
+        const rq = db.transaction(DBS, 'readwrite').objectStore(DBS).put(json, DBK);
+        rq.onsuccess = res; rq.onerror = () => rej(rq.error);
+      });
+      ok = true;
+    }
+    try { localStorage.setItem(LS, json); ok = true; } catch (e) { /* quota LS dépassé : IndexedDB suffit */ }
+  } catch (e) { console.warn('sauvegarde', e); }
+  const el = $('saveSt');
+  if (el) {
+    if (!ok) { el.textContent = '⚠ Sauvegarde impossible'; el.className = 'savest err'; }
+    else {
+      const t = new Date();
+      el.textContent = 'Sauvegardé à ' + String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+      el.className = 'savest';
+    }
+  }
+  return ok;
+}
 function sortReal() {
   const R = D.real, o = R.dates.map((d, i) => [d, i]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
   R.dates = o.map(x => x[0]);
@@ -983,13 +1100,7 @@ function afterImport(page) {
 /* =====================================================================
    AMORÇAGE
    ===================================================================== */
-async function boot() {
-  try { const ls = localStorage.getItem(LS); if (ls) D = JSON.parse(ls); } catch (e) { /* ignoré */ }
-  if (!D) {
-    try { D = await (await fetch('data/data.json', { cache: 'no-store' })).json(); }
-    catch (e) { D = emptyData(); }
-  }
-  ensure();
+async function loadPreloaded() {                     // fichiers statiques du dépôt — ne remplace jamais les données importées
   if (!D.rm2) {                                                     // modèle RM : 1 fichier dédié
     try {
       D.rm2 = await (await fetch('data/roadmap.json', { cache: 'no-store' })).json();
@@ -1022,11 +1133,24 @@ async function boot() {
       }
     } catch (e) { /* fichier absent : données à importer */ }
   }
+}
+async function boot() {
+  try {
+    const s = await storeGet();                                     // IndexedDB, repli localStorage
+    if (s) D = typeof s === 'string' ? JSON.parse(s) : s;
+  } catch (e) { /* ignoré */ }
+  if (!D) {
+    try { D = await (await fetch('data/data.json', { cache: 'no-store' })).json(); }
+    catch (e) { D = emptyData(); }
+  }
+  ensure();
+  await loadPreloaded();
   if (D.plan && D.plan.rows && !D.plan.byAct) buildPlanExtras();    // répartition skills des données préchargées
   buildRoadmapCompat();
   bindUI();
   renderHead();
   fillSelects();
+  { const el = $('saveSt'); if (el && !el.textContent) el.textContent = 'Sauvegarde locale active'; }
   go('p1');
 }
 function bindUI() {
@@ -1037,10 +1161,22 @@ function bindUI() {
   $('bExp2').addEventListener('click', dlJSON);
   $('bDemo').addEventListener('click', demo);
   $('bDemo2').addEventListener('click', demo);
-  $('bReset').addEventListener('click', () => {
+  $('bReset').addEventListener('click', async () => {
     if (!confirm('Effacer les données locales et recharger les données préchargées ?')) return;
-    localStorage.removeItem(LS); location.reload();
+    await storeDel(); location.reload();
   });
+  document.querySelectorAll('.refbtn').forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true; b.classList.add('busy');
+    const old = b.innerHTML;
+    b.innerHTML = '⏳ Chargement…';
+    await loadPreloaded();
+    if (D.plan && D.plan.rows && (!D.plan.byAct || !D.plan.byActSlot)) buildPlanExtras();
+    buildRoadmapCompat();
+    save(); renderHead(); fillSelects();
+    go(b.dataset.p);
+    b.innerHTML = '✓ Actualisé'; b.classList.remove('busy');
+    setTimeout(() => { b.innerHTML = old; b.disabled = false; }, 1200);
+  }));
   bindImports();
   bindGBar();
   $('s1U').addEventListener('change', r1);
@@ -1220,7 +1356,9 @@ function demo() {
     });
   });
   D = base;
+  buildPlanExtras();
   buildRoadmapCompat();
+  save();
   renderHead(); fillSelects(); go('p1');
 }
 
@@ -1357,9 +1495,9 @@ function r1() {
   return r1Ann();
 }
 function bindP1Subs() {
-  document.querySelectorAll('#p1subs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#p1subs button[data-v]').forEach(b => b.addEventListener('click', () => {
     P1V.view = b.dataset.v;
-    document.querySelectorAll('#p1subs button').forEach(x => x.classList.toggle('on', x === b));
+    document.querySelectorAll('#p1subs button[data-v]').forEach(x => x.classList.toggle('on', x === b));
     $('p1fAnn').style.display = P1V.view === 'ann' ? '' : 'none';
     $('p1fJour').style.display = P1V.view === 'jour' ? '' : 'none';
     $('p1fCre').style.display = P1V.view === 'cre' ? '' : 'none';
@@ -1931,36 +2069,40 @@ function rmDailySum(M, acts) {                      // somme journalière sur un
     for (let i = 0; i < n; i++) if (a[i] != null) out[i] += a[i]; });
   return out;
 }
-function renderProdEd() {                           // hypothèses de productivité (actes / heure)
+function renderProdEd() {                           // hypothèses de productivité (actes / heure) par activité × canal
   const el = $('prodEd'); if (!el) return;
-  const set = new Map();
-  const add = a => { const k = norm(a); if (k && !set.has(k)) set.set(k, a); };
-  if (D.rm2 && D.rm2.acts) D.rm2.acts.forEach(a => add(a.k));
-  D.roadmap.forEach(r => add(r.a));
-  RFLOW.forEach(f => add(f.charAt(0) + f.slice(1).toLowerCase()));
-  D.planH.acts.forEach(add);
-  el.innerHTML = set.size ? [...set.entries()].map(([k, nice]) =>
-    `<div class="pitem"><label>${nice}</label><input type="number" min="0" step="0.5" data-k="${k}" value="${D.prod.def[k] ?? ''}" placeholder="actes/h"></div>`).join('')
+  const items = new Map();                          // clé norm(rmProdKey)|norm(chan) -> {a, c} (dédoublonné : Direct ≡ Direct (LAD), Hyper·MAIL ≡ Mail Hyper·MAIL)
+  const add = (a, c) => { if (!a) return; const rk = norm(rmProdKey(a, c)) + '|' + norm(c);
+    if (!items.has(rk)) items.set(rk, { a: String(a).trim(), c: String(c || 'PHONE').toUpperCase() }); };
+  (D.plan && D.plan.acts || []).forEach(k => {      // combinaisons réellement planifiées (Skills)
+    const i = k.indexOf('|'); if (i > 0) add(k.slice(0, i), k.slice(i + 1));
+  });
+  if (D.rm2 && D.rm2.acts) D.rm2.acts.forEach(x => { // activités du modèle RM
+    const s = norm(x.k);
+    add(x.k, s.startsWith('mail') ? 'MAIL' : (s.includes('chat') || s.includes('borne') || s.includes('lsa')) ? 'CHAT' : 'PHONE');
+  });
+  D.roadmap.forEach(r => add(r.a, chanOfAct(r.a)));
+  D.planH.acts.forEach(a => add(a, 'PHONE'));
+  el.innerHTML = items.size ? [...items.entries()].map(([rk, it]) => {
+    const rm = rmHypOf(it.a, it.c);                 // hypothèse du modèle RM (moyenne hebdo)
+    const v = manProdOf(it.a, it.c) ?? '';
+    const src = v !== '' ? '<span class="psrc man">manuel — prioritaire</span>'
+      : rm != null ? '<span class="psrc">modèle RM : ' + fmt1(rm) + ' actes/h</span>'
+      : '<span class="psrc none">à renseigner</span>';
+    return `<div class="pitem"><label>${it.a} · ${it.c}</label>` +
+      `<input type="number" min="0" step="0.5" data-k="${rk}" value="${v}" placeholder="${rm != null ? 'RM : ' + fmt1(rm) : 'actes/h'}">` + src + '</div>';
+  }).join('')
     : '<span class="hint">Aucune activité connue — importez le modèle RM ou le Planning heures.</span>';
   el.querySelectorAll('input').forEach(inp => inp.addEventListener('change', () => {
     const v = n2(inp.value);
     if (v > 0) D.prod.def[inp.dataset.k] = v; else delete D.prod.def[inp.dataset.k];
-    D.prod.file = 'hypothèses manuelles'; save(); r3();
+    D.prod.file = 'hypothèses manuelles';
+    save(); renderProdEd(); r3();
   }));
 }
 /* =====================================================================
    P3 — ANALYSE CAPA (capa roadmap vs planif)
    Capa roadmap : modèle RM (capa en actes / heures de log) répartie par jour
-                  selon les poids de la prévision — cf. rmDaily (onglet Roadmap).
-   Capa planif  : Données DASHBOARD CAPA (feuille Planning + Skills) — heures
-                  planifiées hors FIM × (1 − absentéisme RM) → actes planifiés
-                  = heures de log × productivité (modèle RM, repli : hypothèses saisies).
-   Les jours sans données de planification sont exclus de l'analyse
-   (pas de faux écarts sur l'affichage).
-   ===================================================================== */
-/* =====================================================================
-   P3 — ANALYSE CAPA (capa roadmap vs planif)
-   Capa roadmap : modèle RM (capa en actes / heures de log) réparti par jour
                   selon les poids de la prévision — cf. rmDaily (onglet Roadmap).
    Capa planif  : Données DASHBOARD CAPA (feuille Planning + Skills) — heures
                   planifiées hors FIM × (1 − absentéisme RM) → actes planifiés
@@ -1996,7 +2138,7 @@ function r3() {
   allDays.forEach(d => { const k = kOf(d); if (!(k in idxOf)) { idxOf[k] = keys.length; keys.push(k); } });
   const z = () => Array(keys.length).fill(0);
   const pvA = z(), plA = z(), pvH = z(), plH = z(), hpB = z();
-  const noAbs = new Set(), noProd = new Set(), noHrs = new Set();
+  const noAbs = new Set(), noProd = new Set(), noHrs = new Set(), manA = new Set();
   /* absentéisme & productivité du modèle RM (par semaine) */
   const actsRM = RM ? rmActsSel() : [];
   const absA = RM ? rmAggM('abs', actsRM) : null;
@@ -2041,9 +2183,11 @@ function r3() {
     const wi = rmWeekOfDay(d);
     combos.forEach(k => {
       const h = BA[k] || 0; if (!h) return;
-      const pr = prodRMof(k.split('|')[0], wi);
-      if (pr == null) noProd.add(k.split('|')[0]);
-      else plA[k2] += h * fAbs * pr;
+      const i2 = k.indexOf('|'), a = k.slice(0, i2), c = k.slice(i2 + 1);
+      const pr = planProdOf(a, c, wi);                 // capa planif : productivité RM (canal précis) ou hypothèse manuelle
+      if (pr == null) { noProd.add(a); return; }
+      if (manProdOf(a, c) != null) manA.add(a);
+      plA[k2] += h * fAbs * pr;
     });
   });
   const rd = a => a.map(v => Math.round(v));
@@ -2052,7 +2196,8 @@ function r3() {
   const HB = hpB.reduce((a, b) => a + b, 0);
   $('k3').innerHTML =
     kpi('Capa roadmap (actes)', fmt(Math.round(TP)), g + ' · ' + gfLbl() + ' · ' + allDays.length + ' j avec planif') +
-    kpi('Capa planif (actes)', fmt(Math.round(TL)), 'heures de log × productivité' +
+    kpi('Capa planif (actes)', fmt(Math.round(TL)), 'heures de log × productivité ' +
+        (manA.size ? 'manuelle (' + [...manA].join(', ') + ')' : 'du modèle RM') +
         (noProd.size ? ' · manquante : ' + [...noProd].join(', ') : ''), TP ? Math.min(100, Math.abs(TL - TP) / TP * 100) : 0) +
     kpi('Écart (planif − roadmap)', fmt(Math.round(TL - TP)), TL - TP >= 0 ? 'sur-capacité' : 'sous-capacité',
         TP ? Math.min(100, Math.abs(TL - TP) / TP * 100) : 0) +
@@ -2092,9 +2237,9 @@ function r3() {
   notes.push('Seuls les jours couverts par la planification sont analysés (' + allDays.length + ' j' +
     (g !== 'jour' ? ' · granularité ' + g : '') + ') — les jours sans planif sont exclus pour ne pas fausser les écarts.');
   notes.push('Capa roadmap = capa hebdomadaire du modèle RM répartie par jour selon les poids de la prévision (cf. onglet Roadmap).');
-  notes.push('Capa planif = heures planifiées hors FIM (feuille Planning, réparties par activité × canal selon la feuille Skills) × (1 − absentéisme RM) ; actes = heures de log × productivité.');
+  notes.push('Capa planif = heures planifiées hors FIM (feuille Planning, réparties par activité × canal selon la feuille Skills) × (1 − absentéisme RM) ; actes = heures de log × productivité du modèle RM (« Productivité » : Mail Hyper / Mail AFR pour le canal MAIL, Direct (LAD)…) — les hypothèses manuelles saisies ci-dessous sont prioritaires et sauvegardées automatiquement.');
   if (noAbs.size) notes.push('Absentéisme du modèle RM indisponible pour ' + noAbs.size + ' jour(s) — déduction non appliquée sur ces jours.');
-  if (noProd.size) notes.push('Productivité manquante : ' + [...noProd].join(', ') + ' — renseignez le modèle RM (section Productivité) ou les hypothèses ci-dessous.');
+  if (noProd.size) notes.push('Productivité manquante : ' + [...noProd].join(', ') + ' — renseignez les hypothèses de productivité ci-dessous (elles restent enregistrées après actualisation).');
   if (noHrs.size) notes.push('Heures roadmap converties via la productivité (section « capa en heures de log » absente pour : ' + [...noHrs].join(', ') + ').');
   $('p3Hint').textContent = notes.join(' ');
   $('w3Src').textContent = 'Capa roadmap : modèle RM (' + (D.meta.rm2 || (RM && RM.meta && RM.meta.file) || 'RM') + ') × poids de la prévision · Capa planif : ' +
@@ -2326,9 +2471,9 @@ function r8Cre() {
 function bind8() {
   $('w8V').addEventListener('change', r8);
   $('w8D').addEventListener('change', r8);
-  document.querySelectorAll('#p8subs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#p8subs button[data-v]').forEach(b => b.addEventListener('click', () => {
     P8V.view = b.dataset.v;
-    document.querySelectorAll('#p8subs button').forEach(x => x.classList.toggle('on', x === b));
+    document.querySelectorAll('#p8subs button[data-v]').forEach(x => x.classList.toggle('on', x === b));
     gfDisables(); r8();
   }));
   RENDERS.p8 = r8;

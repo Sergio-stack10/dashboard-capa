@@ -62,9 +62,31 @@ filtres de période).
 3. **Analyse capa** — **capa roadmap vs capa planif** (l'ancien « réalisé » a été retiré) :
    - capa roadmap = capa hebdo du modèle RM répartie par jour (poids prévision) ;
    - capa planif = heures planifiées hors FIM × (1 − absentéisme RM) → actes = heures de log
-     × productivité (modèle RM ou hypothèses éditables dans l'onglet) ;
+     × **productivité du modèle RM** (par activité **et par canal** : `Mail Hyper` / `Mail AFR` /
+     `Mail Drive` pour le canal MAIL, `Direct (LAD)` pour Direct, etc.) ;
    - **seuls les jours couverts par la planification sont analysés** (les jours sans planif sont
      exclus pour ne pas fausser les écarts).
+
+## Persistance, productivité et actualisation (nouveau)
+
+- **Sauvegarde automatique** — tout import (et la démo) est enregistré immédiatement dans le
+  navigateur (**IndexedDB**, repli localStorage). Les données **restent après actualisation ou
+  fermeture de la page**, même pour de gros fichiers : localStorage seul était limité à ~5 Mo et
+  la sauvegarde échouait en silence (cause des pertes constatées). L'entête affiche l'état
+  (« Sauvegarde locale active » / « Sauvegardé à HH:MM » / « ⚠ Sauvegarde impossible »).
+  « Réinitialiser » efface IndexedDB + localStorage et recharge les données préchargées.
+- **Capa planif et productivité du roadmap** — la conversion « heures de log → actes » de la
+  capa planif utilise les hypothèses de productivité **du modèle RM** (section `Productivité`,
+  valeur hebdomadaire de la semaine concernée), avec la clé exacte par activité et canal.
+- **Hypothèses de productivité manuelles** (onglet Analyse capa, section « Hypothèses de
+  productivité — actes / heure ») — une ligne par activité × canal ; la valeur RM courante est
+  affichée sous chaque champ. Saisir une valeur **remplace** l'hypothèse RM (badge
+  « manuel — prioritaire », le KPI « Capa planif » le précise) ; vider le champ pour revenir au
+  modèle RM. Les valeurs saisies sont **sauvegardées automatiquement** et retrouvées après
+  actualisation.
+- **Bouton ↻ Actualiser sur chaque page** (Roadmap, Planification, Analyse capa, Analyse
+  réalisé) — recharge les fichiers préchargés du site (sans jamais écraser les données importées
+  localement), ré-affiche la page courante et met à jour l'entête.
 
 4. **Analyse réalisé** (ex-Productivité) — sections Phone / Mail / Chat : QS, QP, QE, T/P, DMT,
    productivité, taux d'occupation, d'après EXT_Entrant et EXT_Email. *Rework prévu avec l'équipe.*
