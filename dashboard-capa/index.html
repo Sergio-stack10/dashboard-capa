@@ -232,6 +232,11 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
     <div class="grp"><label>Vue créneaux</label><select id="w1CV">
       <option value="moy" selected>Moyenne période</option><option value="jour">Jour précis</option></select></div>
     <div class="grp"><label>Jour (créneaux)</label><input type="date" id="w1CD"></div>
+    <div class="grp"><label>Heure Paris → Mada</label><select id="w1CTZ">
+      <option value="2" selected>Vision Mada (+2 h)</option><option value="1">Vision Mada (+1 h)</option>
+      <option value="0">Heure Paris (0 h)</option></select></div>
+    <div class="grp"><label>Agrégat</label><select id="w1CAg">
+      <option value="30" selected>Créneaux 30 min</option><option value="h">Heures pleines</option></select></div>
     <div class="src" id="w1CSrc"></div>
   </div>
 
@@ -251,7 +256,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
     <div class="card"><h3>9 · Congés — ETP par semaine</h3><div class="charthold"><canvas id="c1i"></canvas></div></div>
     <div class="card"><h3>Détail hebdomadaire — <span id="t1Per">Total</span></h3>
       <div class="tblwrap"><table id="t1"></table></div>
-      <p class="hint" id="h1"></p></div>
+   </div>
   </div>
 
   <!-- vue journalière -->
@@ -269,7 +274,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
     </div>
     <div class="card"><h3>Détail par jour — <span id="t1jPer">Total</span></h3>
       <div class="tblwrap"><table id="t1j"></table></div>
-      <p class="hint" id="h1j"></p></div>
+   </div>
   </div>
 
   <!-- vue par créneaux -->
@@ -281,7 +286,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
     </div>
     <div class="card"><h3>Détail par créneau 30 min — <span id="t1cPer">Total</span></h3>
       <div class="tblwrap"><table id="t1c"></table></div>
-      <p class="hint" id="h1c"></p></div>
+   </div>
   </div>
 </section>
 
@@ -311,7 +316,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
     </div>
     <div class="card"><h3>Détail par jour — heures réparties par activité × canal</h3>
       <div class="tblwrap"><table id="t8"></table></div>
-      <p class="hint" id="h8"></p></div>
+   </div>
   </div>
 
   <!-- vue par créneaux -->
@@ -348,13 +353,8 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
   </div>
   <div class="card"><h3>Détail par période — uniquement les jours avec planification</h3><div class="tblwrap"><table id="t3"></table></div></div>
   <div class="card"><h3>Hypothèses de productivité — actes / heure</h3>
-    <p class="hint">La capa planif (actes) = heures de log × productivité. Par défaut, l'hypothèse du <b>modèle RM</b> est utilisée
-    (productivité par activité <b>et par canal</b> : Mail Hyper / Mail AFR pour le canal MAIL, Direct (LAD), etc. — valeur affichée sous chaque champ).
-    Saisissez une valeur pour <b>remplacer</b> l'hypothèse RM d'une activité : elle s'applique immédiatement et reste <b>sauvegardée automatiquement</b>
-    dans ce navigateur, même après actualisation de la page. Videz le champ pour revenir au modèle RM.</p>
     <div class="prodgrid" id="prodEd"></div>
   </div>
-  <div class="card"><p class="hint" id="p3Hint"></p></div>
 </section>
 
 <!-- ================= P5 : ANALYSE RÉALISÉ (ex-Productivité — sections par canal) ================= -->

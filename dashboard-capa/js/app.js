@@ -978,7 +978,8 @@ function impDashCapa(name, buf) {
 
 /* ---- Prévision Webhelp : onglet « 2026 » (prévus mensuels par flux) + onglet « Poids » ----
    Poids journaliers (Appel B-F, Mail J-L) -> vue par jour ; créneaux 30 min (col. R :
-   730 = 07:30, profils « Lundi au samedi » / « Dimanche » S..AA) -> vue par créneau.
+   codes = FIN de créneau (800 = [07:30 → 08:00) Paris), profils « Lundi au samedi » /
+   « Dimanche » S..AA) -> vue par créneau.
    Les poids sont normalisés (Σ = 1 par mois × canal × flux et par mois × flux × profil). */
 const PACTS = ['hyper', 'c2e', 'afr', 'drive', 'sav', 'direct'];
 const PCOL  = { hyper: '#3b5bdb', c2e: '#0ca678', afr: '#f59f00', drive: '#7048e8', sav: '#e8590c', direct: '#868e96' };
@@ -1534,6 +1535,14 @@ function bindP1Subs() {
   $('w1CY').addEventListener('change', () => { fillW1Weeks('C'); fillW1Days(); r1(); });
   $('w1CM').addEventListener('change', () => { fillW1Weeks('C'); fillW1Days(); r1(); });
   ['w1CW', 'w1CA', 'w1CB', 'w1CV', 'w1CD'].forEach(id => $(id).addEventListener('change', r1));
+  /* fuseau d'affichage & agrégat de la vue par créneaux (persistés) */
+  try { const tz = JSON.parse(localStorage.getItem('capaTZ') || '{}');
+    if (tz.tz != null && $('w1CTZ')) $('w1CTZ').value = String(tz.tz);
+    if (tz.ag && $('w1CAg')) $('w1CAg').value = tz.ag; } catch (e) {}
+  const tzSave = () => { try { localStorage.setItem('capaTZ',
+    JSON.stringify({ tz: +($('w1CTZ') ? $('w1CTZ').value : 0), ag: $('w1CAg') ? $('w1CAg').value : '30' })); } catch (e) {} };
+  tzSave();
+  ['w1CTZ', 'w1CAg'].forEach(id => $(id).addEventListener('change', () => { tzSave(); r1(); }));
 }
 function fillSel(id, opts) {                         // remplit un select en conservant la sélection
   const el = $(id), cur = el.value;
@@ -1583,7 +1592,7 @@ function r1Ann() {
   const blank = () => {
     $('k1').innerHTML = '<div class="kpi"><div class="lbl">Aucun modèle RM</div><div class="sub">Importez le modèle RM (.xlsm, onglet AUCHAN) via « Importer » — besoin &amp; capacité, SLA/QE, DMT, occupation, absentéisme, congés.</div></div>';
     C1.forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
-    $('t1').innerHTML = ''; $('h1').textContent = ''; $('t1Per').textContent = '—';
+    $('t1').innerHTML = ''; $('t1Per').textContent = '—';
     $('w1Src').textContent = 'Modèle RM : à importer';
   };
   if (!R || !R.weeks || !R.weeks.length) { blank(); return; }
@@ -1594,7 +1603,7 @@ function r1Ann() {
   if (!win.length) {
     $('k1').innerHTML = '<div class="kpi"><div class="lbl">Aucune semaine sur la période</div><div class="sub">Élargissez les filtres Année / Mois de la vue annuelle.</div></div>';
     C1.forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
-    $('t1').innerHTML = ''; $('h1').textContent = ''; $('t1Per').textContent = '—';
+    $('t1').innerHTML = ''; $('t1Per').textContent = '—';
     return;
   }
   const showY = new Set(win.map(i => R.weeks[i].y)).size > 1;
@@ -1748,11 +1757,6 @@ function r1Ann() {
   $('t1').innerHTML = h;
   $('t1Per').textContent = perLbl;
 
-  const notes = [];
-  if (ceMode === 'taux') notes.push('Congés en ETP indisponibles (feuille Congés absente) — courbe affichée en taux (%).');
-  if (perLbl === 'Total') notes.push('« Effectif saisi » = ligne Effectif du fichier (têtes) ; les barres = somme des ETP répartis par activité.');
-  notes.push('QE = capacité actes ÷ prévision finale · DMT / TO / absentéisme agrégés en pondéré (poids : prévision ou effectif).');
-  $('h1').textContent = notes.join(' ');
   $('w1Src').textContent = 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') +
     ' · ' + win.length + '/' + W + ' sem. (' + (R.weeks[win[0]] || {}).k + ' → ' + (R.weeks[win[win.length - 1]] || {}).k + ') · ' + perLbl;
 }
@@ -1764,7 +1768,7 @@ function r1Jour() {
   const blank = msg => {
     $('k1j').innerHTML = '<div class="kpi"><div class="lbl">' + msg + '</div></div>';
     CJ.forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
-    $('t1j').innerHTML = ''; $('h1j').textContent = ''; $('t1jPer').textContent = '—';
+    $('t1j').innerHTML = ''; $('t1jPer').textContent = '—';
     $('w1JSrc').textContent = 'Vue journalière : indisponible';
   };
   if (!R || !R.weeks || !R.weeks.length) { blank('Aucun modèle RM — importez le modèle RM (onglet AUCHAN)'); return; }
@@ -1784,9 +1788,17 @@ function r1Jour() {
     return days.map(d => { const i = rmWeekOfDay(d); return i >= 0 && A && A[i] != null ? A[i] : null; }); };
   const CA = volOf('capa_a'), PF = volOf('pfin'), CHL = volOf('capa_hlog'), BHL = volOf('bes_hlog'),
         CHP = volOf('capa_hprod'), BHP = volOf('bes_hprod'), BE = volOf('bes_etp'), EP = volOf('eff_prod');
-  const QE = days.map((d, i) => PF.v[i] > 0 ? CA.v[i] / PF.v[i] : null);
+  /* prévision Webhelp du jour = prévu du MOIS × poids journalier (logique « Calcul prévision ») */
+  const PFW = { v: days.map(() => 0), any: false };
+  days.forEach((d, i) => acts.forEach(k => {
+    const pk = prevKeyOfAct(k); if (!pk) return;
+    const v = whPrevDay(pk[1], pk[0], d);
+    if (v != null) { PFW.v[i] += v; PFW.any = true; }
+  }));
+  const QE = days.map((d, i) => PFW.any && PFW.v[i] > 0 ? CA.v[i] / PFW.v[i] : (PF.v[i] > 0 ? CA.v[i] / PF.v[i] : null));
   const DMT = rateOf('dmt'), OCC = rateOf('occ'), ABS = rateOf('abs'), CG = rateOf('conges'), CIB = rateOf('cible');
   const tCA = CA.v.reduce((a, b) => a + b, 0), tPF = PF.v.reduce((a, b) => a + b, 0);
+  const tPFW = PFW.v.reduce((a, b) => a + b, 0);
   const tCH = CHL.v.reduce((a, b) => a + b, 0), tBH = BHL.v.reduce((a, b) => a + b, 0);
   const dE = EP.v.reduce((a, b) => a + b, 0) - BE.v.reduce((a, b) => a + b, 0);
   const avgN = a => { const vs = a.filter(v => v != null); return vs.length ? vs.reduce((x, y) => x + y, 0) / vs.length : null; };
@@ -1794,8 +1806,12 @@ function r1Jour() {
   const iMax = CA.v.indexOf(Math.max(...CA.v));
   $('k1j').innerHTML =
     kpi('Capa roadmap (actes)', fmt(Math.round(tCA)), days.length + ' j · ' + gfLbl()) +
-    kpi('Prévision finale', fmt(Math.round(tPF)), 'couverture ' + pctS(tCA, tPF)) +
-    kpi('SLA / QE', pc1(tPF > 0 ? tCA / tPF : null), 'capa actes / prévision', tPF > 0 ? Math.min(100, tCA / tPF * 100) : 0) +
+    kpi('Prévision Webhelp', PFW.any ? fmt(Math.round(tPFW)) : '—',
+        PFW.any ? 'prévu du mois × poids journalier · couverture ' + pctS(tCA, tPFW) : 'prévision Webhelp absente') +
+    kpi('Prévision finale (RM)', fmt(Math.round(tPF)), 'couverture ' + pctS(tCA, tPF)) +
+    kpi('SLA / QE', pc1(PFW.any && tPFW > 0 ? tCA / tPFW : (tPF > 0 ? tCA / tPF : null)),
+        'capa actes ÷ ' + (PFW.any ? 'prévision Webhelp (mois × poids daily)' : 'prévision finale RM'),
+        PFW.any && tPFW > 0 ? Math.min(100, tCA / tPFW * 100) : (tPF > 0 ? Math.min(100, tCA / tPF * 100) : 0)) +
     kpi('Capa heures de log', fmt(Math.round(tCH)) + ' h', 'besoin ' + fmt(Math.round(tBH)) + ' h') +
     kpi('Écart ETP', fmt1(dE), dE >= 0 ? 'sur-capacité' : 'sous-capacité') +
     (tCA ? kpi('Jour le plus chargé', fmt(Math.round(CA.v[iMax])), dShort(days[iMax]) + ' · ' + jJours(days[iMax])) : '') +
@@ -1815,7 +1831,8 @@ function r1Jour() {
 
   mkChart('c1ja', { type: 'bar', data: { labels: labJ, datasets: [
       { label: 'Capa roadmap (actes)', data: CA.v, backgroundColor: '#3b5bdb', borderRadius: 3 },
-      { label: 'Prévision finale', data: PF.v, type: 'line', borderColor: '#1b2440', borderWidth: 2, pointRadius: 0, tension: .3 }] },
+      { label: 'Prévision Webhelp (mois × poids daily)', data: PFW.v.map(v => Math.round(v)), type: 'line', borderColor: '#1b2440', borderWidth: 2, pointRadius: 0, tension: .3 },
+      { label: 'Prévision finale (RM)', data: PF.v, type: 'line', borderColor: '#f59f00', borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, tension: .3 }] },
     options: optJ(yV('actes / jour')) });
   mkChart('c1jb', { type: 'bar', data: { labels: labJ, datasets: [
       { label: 'Capa h log', data: CHL.v, backgroundColor: '#3b5bdb', borderRadius: 3 },
@@ -1849,7 +1866,7 @@ function r1Jour() {
 
   const fmtC = { vol: v => v == null ? '—' : fmt(Math.round(v)), e: v => v == null ? '—' : fmt1(v),
     pc: v => v == null ? '—' : (Math.round(v * 1000) / 10) + ' %', s: v => v == null ? '—' : Math.round(v) + ' s' };
-  const cols = [['Prévu final', PF.v, fmtC.vol], ['Capa actes', CA.v, fmtC.vol], ['QE', QE, fmtC.pc], ['Cible', CIB, fmtC.pc],
+  const cols = [['Prévu Webhelp', PFW.v, fmtC.vol], ['Prévu final (RM)', PF.v, fmtC.vol], ['Capa actes', CA.v, fmtC.vol], ['QE', QE, fmtC.pc], ['Cible', CIB, fmtC.pc],
     ['Capa h log', CHL.v, fmtC.vol], ['Besoin h log', BHL.v, fmtC.vol], ['Capa h prod', CHP.v, fmtC.vol], ['Besoin h prod', BHP.v, fmtC.vol],
     ['Besoin ETP', BE.v, fmtC.e], ['Eff. productif', EP.v, fmtC.e], ['DMT', DMT, fmtC.s], ['Occup.', OCC, fmtC.pc],
     ['Abs.', ABS, fmtC.pc], ['Congés', CG, fmtC.pc]];
@@ -1862,7 +1879,7 @@ function r1Jour() {
   cols.forEach(([, a, f], ci) => {
     const vs = a.filter(v => v != null);
     if (!vs.length) { h += '<td>—</td>'; return; }
-    if (['Prévu final', 'Capa actes', 'Capa h log', 'Besoin h log', 'Capa h prod', 'Besoin h prod'].includes(cols[ci][0]))
+    if (['Prévu Webhelp', 'Prévu final (RM)', 'Capa actes', 'Capa h log', 'Besoin h log', 'Capa h prod', 'Besoin h prod'].includes(cols[ci][0]))
       h += '<td>' + fmt(Math.round(vs.reduce((x, y) => x + y, 0))) + '</td>';
     else if (['Besoin ETP', 'Eff. productif'].includes(cols[ci][0]))
       h += '<td>' + fmt1(vs.reduce((x, y) => x + y, 0)) + '</td>';
@@ -1872,10 +1889,6 @@ function r1Jour() {
   h += '</tr></tfoot>';
   $('t1j').innerHTML = h;
   $('t1jPer').textContent = perLbl;
-  $('h1j').textContent =
-    'Capa journalière = capa hebdomadaire du modèle RM répartie par jour au prorata des poids de la prévision Webhelp ' +
-    '(normalisés sur les jours de chaque semaine). ' +
-    'SLA/QE du jour = capa actes ÷ prévision finale · DMT / TO / absentéisme / congés = hypothèses hebdomadaires du modèle RM (constantes sur la semaine).';
   $('w1JSrc').textContent = 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') +
     ' · ' + days.length + ' jours (' + dShort(days[0]) + ' → ' + dShort(days[days.length - 1]) + ') · ' + perLbl +
     (prevHas() ? ' · poids : Prévision Webhelp' : ' · poids de prévision absents : répartition uniforme');
@@ -1896,7 +1909,7 @@ function r1Cre() {
   const blank = msg => {
     $('k1c').innerHTML = '<div class="kpi"><div class="lbl">' + msg + '</div></div>';
     CC.forEach(c => mkChart(c, { type: 'bar', data: { labels: [], datasets: [] } }));
-    $('t1c').innerHTML = ''; $('h1c').textContent = ''; $('t1cPer').textContent = '—';
+    $('t1c').innerHTML = ''; $('t1cPer').textContent = '—';
     $('w1CSrc').textContent = 'Vue par créneaux : indisponible';
   };
   if (!R || !R.weeks || !R.weeks.length) { blank('Aucun modèle RM — importez le modèle RM (onglet AUCHAN)'); return; }
@@ -1909,6 +1922,11 @@ function r1Cre() {
   const dSel = $('w1CD').value;
   const daysUse = mode === 'jour' ? (dSel && days.includes(dSel) ? [dSel] : []) : days;
   if (!daysUse.length) { blank('Choisissez un jour couvert par la période sélectionnée (ou passez en « Moyenne période »)'); return; }
+  /* fuseau d'affichage — la prévision est en heure Paris, le planning en heure Madagascar :
+     les créneaux prévision / capa roadmap sont affichés décalés (0 / +1 h / +2 h). */
+  const TZ = +((($('w1CTZ') || {}).value) || 0);
+  const tzLbl = TZ === 2 ? 'Mada +2 h' : TZ === 1 ? 'Mada +1 h' : 'heure Paris';
+  const AG = (($('w1CAg') || {}).value) || '30';     // '30' : créneaux 30 min · 'h' : heures pleines
   /* univers de créneaux : poids de la prévision (repli 07:30 → 22:30) */
   const cre = (D.prev && D.prev.creneaux) || {};
   const tuni = new Set();
@@ -1917,30 +1935,38 @@ function r1Cre() {
   const slotList = (tuni.size ? [...tuni].sort((a, b) => a - b) : SLOTS_DEF.slice());
   const nS = slotList.length;
   const profOf = d => jJours(d) === 'dimanche' ? 'dim' : 'ls';
+  /* ventilation selon la logique « Calcul prévision » :
+     prévision du jour = prévu du MOIS × poids journalier (whPrevDay) ;
+     prévision du créneau = prévision du jour × poids intraday du créneau (Σ poids = 1) ;
+     les codes du fichier désignent la FIN du créneau (800 = [07:30 → 08:00) Paris) ;
+     heure pleine = somme des 2 créneaux consécutifs. Repli : prévision finale RM
+     quand le mois / flux n'a pas de prévision Webhelp. */
   const MCA = rmDaily('capa_a'), MCH = rmDaily('capa_hlog'), MPF = rmDaily('pfin'), MBH = rmDaily('bes_hlog');
   const accA = {}, accH = {}, accP = Array(nS).fill(0), accBH = Array(nS).fill(0);
-  let etpRatioSum = 0, etpRatioN = 0;
+  let etpRatioSum = 0, etpRatioN = 0, repliN = 0;
   daysUse.forEach(d => {
     const di = MCA.dates.indexOf(d); if (di < 0) return;
     const wi = rmWeekOfDay(d);
     const prof = profOf(d);
-    let dayH = 0, dayHW = 0;
     acts.forEach(k => {
       const ca = (MCA.by[k] || [])[di]; if (ca == null) return;
       const w = slotWOf(k, prof, mKey(d));
       const chl = (MCH.by[k] || [])[di];
-      const cpf = (MPF.by[k] || [])[di];
       const cbh = (MBH.by[k] || [])[di];
+      const pk = prevKeyOfAct(k);
+      const pvW = pk ? whPrevDay(pk[1], pk[0], d) : null;       // prévision Webhelp du jour (mois × poids daily)
+      const cpf = pvW == null ? (MPF.by[k] || [])[di] : null;   // repli : prévision finale RM du jour
+      if (pvW == null && cpf != null) repliN++;
       const wa = accA[k] = accA[k] || Array(nS).fill(0);
       const wh = accH[k] = accH[k] || Array(nS).fill(0);
       slotList.forEach((t, si) => {
         const wt = w ? (w[t] || 0) : 1 / nS;
         wa[si] += ca * wt;
         if (chl != null) wh[si] += chl * wt;
-        if (cpf != null) accP[si] += cpf * wt;
+        const pv = pvW != null ? pvW : cpf;
+        if (pv != null) accP[si] += pv * wt;
         if (cbh != null) accBH[si] += cbh * wt;
       });
-      if (chl != null) { dayH += chl; dayHW += chl; }
     });
     const EPW = rmAggM('eff_prod', acts), CHW = rmAggM('capa_hlog', acts);
     if (wi >= 0 && EPW[wi] != null && CHW[wi] > 0) { etpRatioSum += EPW[wi] / CHW[wi]; etpRatioN++; }
@@ -1953,56 +1979,76 @@ function r1Cre() {
   const etpRatio = etpRatioN ? etpRatioSum / etpRatioN : null;
   const ETP = etpRatio ? H.map(v => Math.round(v * etpRatio * 100) / 100) : null;
   const totA = A && Object.keys(A).length ? Object.values(A).reduce((s, a) => s.map((v, i) => v + a[i]), Array(nS).fill(0)) : Array(nS).fill(0);
-  const iMax = totA.indexOf(Math.max(...totA));
-  const sumTot = totA.reduce((a, b) => a + b, 0), sumP = P.reduce((a, b) => a + b, 0), sumH = H.reduce((a, b) => a + b, 0);
+  /* lignes d'affichage : créneaux 30 min ou heures pleines (2 créneaux consécutifs) ;
+     affichage par intervalle, décalé au fuseau choisi */
+  const toMin = c => Math.floor(c / 100) * 60 + c % 100;
+  const labMin = m => { const x = ((m % 1440) + 1440) % 1440; return slotLab(Math.floor(x / 60) * 100 + x % 60); };
+  const labBeg = c => labMin(toMin(c) - 30 + TZ * 60);             // début du créneau (fuseau)
+  const labEnd = c => labMin(toMin(c) + TZ * 60);                  // fin du créneau (fuseau)
+  const slotSucc = t => (t % 100) === 30 ? t + 70 : t + 30;        // code 30 min plus tard
+  const rows = [];
+  if (AG === 'h') {
+    for (let i = 0; i < slotList.length; i++) {
+      const t = slotList[i], t2 = slotSucc(t);
+      if (i + 1 < slotList.length && slotList[i + 1] === t2) {
+        rows.push({ idxs: [i, i + 1], lab: labBeg(t) + ' → ' + labEnd(t2) }); i++;
+      } else rows.push({ idxs: [i], lab: labBeg(t) + ' → ' + labEnd(t) });
+    }
+  } else slotList.forEach((t, i) => rows.push({ idxs: [i], lab: labBeg(t) + ' → ' + labEnd(t) }));
+  const aggR = a => rows.map(r => r.idxs.reduce((s, si) => s + a[si], 0));
+  const totR = aggR(totA), PR = aggR(P), HR = aggR(H), BHR = aggR(BH);
+  const ETPR = ETP ? aggR(ETP) : null;
+  const AR = {}; Object.keys(A).forEach(k => AR[k] = aggR(A[k]));
+  const iMaxR = totR.indexOf(Math.max(...totR));
+  const sumTot = totR.reduce((a, b) => a + b, 0), sumP = PR.reduce((a, b) => a + b, 0), sumH = HR.reduce((a, b) => a + b, 0);
   const lblC = mode === 'jour' ? dShort(daysUse[0]) + ' (' + jJours(daysUse[0]) + ')' : 'moyenne ' + nD + ' jours';
+  const aggLbl = AG === 'h' ? 'heure' : 'créneau';
   $('k1c').innerHTML =
     kpi('Capa actes (' + (mode === 'jour' ? 'jour' : 'moy. / jour') + ')', fmt(Math.round(sumTot)), lblC + ' · ' + gfLbl()) +
-    (sumTot ? kpi('Pointe actes', fmt(Math.round(totA[iMax])), slotLab(slotList[iMax]) + ' · ' + lblC) : '') +
+    (sumTot ? kpi('Pointe actes', fmt(Math.round(totR[iMaxR])), rows[iMaxR].lab + ' · ' + lblC) : '') +
     kpi('Capa heures de log', fmt(Math.round(sumH)) + ' h', (mode === 'jour' ? 'jour' : 'moy. / jour') + ' · Σ créneaux') +
-    kpi('Prévision finale', fmt(Math.round(sumP)), 'couverture ' + pctS(sumTot, sumP)) +
-    kpi('ETP à la pointe', ETP ? fmt1(ETP[iMax]) : '—', 'effectif productif ÷ capa h log') +
-    kpi('QE', pc1v(sumP > 0 ? sumTot / sumP : null), 'capa / prévision', sumP > 0 ? Math.min(100, sumTot / sumP * 100) : 0);
+    kpi('Prévision Webhelp', fmt(Math.round(sumP)), 'mois × poids daily × poids ' + aggLbl +
+        (repliN ? ' · repli prévision finale RM' : '') + ' · couverture ' + pctS(sumTot, sumP)) +
+    kpi('ETP à la pointe', ETPR ? fmt1(ETPR[iMaxR]) : '—', 'effectif productif ÷ capa h log') +
+    kpi('QE', pc1v(sumP > 0 ? sumTot / sumP : null), 'capa / prévision Webhelp', sumP > 0 ? Math.min(100, sumTot / sumP * 100) : 0);
   function pc1v(v) { return v == null ? '—' : (Math.round(v * 1000) / 10) + ' %'; }
-  const lbls = slotList.map(slotLab);
-  const actKeys = Object.keys(A);
+  const lbls = rows.map(r => r.lab);
+  const actKeys = Object.keys(AR);
   mkChart('c1ca', { type: 'bar', data: { labels: lbls, datasets: [
-      ...actKeys.map((k, i) => ({ label: k, data: A[k], backgroundColor: PAL[i % PAL.length], stack: 's', borderRadius: 2 })),
-      { label: 'Prévision finale (actes)', data: P.map(v => Math.round(v)), type: 'line', borderColor: '#1b2440',
+      ...actKeys.map((k, i) => ({ label: k, data: AR[k], backgroundColor: PAL[i % PAL.length], stack: 's', borderRadius: 2 })),
+      { label: 'Prévision Webhelp (actes)', data: PR.map(v => Math.round(v)), type: 'line', borderColor: '#1b2440',
         borderWidth: 2, pointRadius: 0, tension: .3 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' },
         tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y ?? 0) } } },
       scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
-                y: { stacked: true, beginAtZero: true, ...axisY('actes / créneau') } } } });
+                y: { stacked: true, beginAtZero: true, ...axisY('actes / ' + aggLbl) } } } });
   mkChart('c1cb', { type: 'bar', data: { labels: lbls, datasets: [
-      { label: 'Capa heures de log', data: H.map(v => Math.round(v * 10) / 10), backgroundColor: '#3b5bdb', borderRadius: 2 },
-      { label: 'Besoin (h)', data: BH.map(v => Math.round(v * 10) / 10), backgroundColor: 'rgba(232,89,12,.55)', borderRadius: 2 },
-      ...(ETP ? [{ label: 'ETP productif', data: ETP, type: 'line', borderColor: '#7048e8', borderWidth: 2, pointRadius: 0, tension: .3, yAxisID: 'y2' }] : [])] },
+      { label: 'Capa heures de log', data: HR.map(v => Math.round(v * 10) / 10), backgroundColor: '#3b5bdb', borderRadius: 2 },
+      { label: 'Besoin (h)', data: BHR.map(v => Math.round(v * 10) / 10), backgroundColor: 'rgba(232,89,12,.55)', borderRadius: 2 },
+      ...(ETPR ? [{ label: 'ETP productif', data: ETPR, type: 'line', borderColor: '#7048e8', borderWidth: 2, pointRadius: 0, tension: .3, yAxisID: 'y2' }] : [])] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom' },
         tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ' : ' + fmt1(c.parsed.y ?? 0) } } },
       scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
-                y: { stacked: true, beginAtZero: true, ...axisY('heures / créneau') },
+                y: { stacked: true, beginAtZero: true, ...axisY('heures / ' + aggLbl) },
                 y2: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: 'ETP', font: { size: 10.5 } } } } } });
-  let h = '<thead><tr><th>Créneau</th><th>Capa actes</th><th>Prévu (actes)</th><th>QE</th><th>Capa h log</th><th>Besoin (h)</th><th>ETP productif</th></tr></thead><tbody>';
-  slotList.forEach((t, i) => {
-    const q = P[i] > 0 ? totA[i] / P[i] : null;
-    h += `<tr><td>${slotLab(t)}</td><td>${fmt1(totA[i])}</td><td>${fmt1(P[i])}</td>` +
+  let h = '<thead><tr><th>' + (AG === 'h' ? 'Heure' : 'Créneau') + ' (' + tzLbl + ')</th><th>Capa actes</th><th>Prévu (actes)</th><th>QE</th><th>Capa h log</th><th>Besoin (h)</th><th>ETP productif</th></tr></thead><tbody>';
+  rows.forEach((r, i) => {
+    const q = PR[i] > 0 ? totR[i] / PR[i] : null;
+    h += `<tr><td>${r.lab}</td><td>${fmt1(totR[i])}</td><td>${fmt1(PR[i])}</td>` +
          `<td>${q == null ? '—' : (Math.round(q * 1000) / 10) + ' %'}</td>` +
-         `<td>${fmt1(H[i])}</td><td>${fmt1(BH[i])}</td><td>${ETP ? fmt1(ETP[i]) : '—'}</td></tr>`;
+         `<td>${fmt1(HR[i])}</td><td>${fmt1(BHR[i])}</td><td>${ETPR ? fmt1(ETPR[i]) : '—'}</td></tr>`;
   });
   h += `</tbody><tfoot><tr><td>Σ — ${lblC}</td><td>${fmt1(sumTot)}</td><td>${fmt1(sumP)}</td>` +
        `<td>${sumP > 0 ? (Math.round(sumTot / sumP * 1000) / 10) + ' %' : '—'}</td>` +
-       `<td>${fmt1(sumH)}</td><td>${fmt1(BH.reduce((a, b) => a + b, 0))}</td>` +
-       `<td>${ETP ? fmt1(Math.max(...ETP)) + ' (max)' : '—'}</td></tr></tfoot>`;
+       `<td>${fmt1(sumH)}</td><td>${fmt1(BHR.reduce((a, b) => a + b, 0))}</td>` +
+       `<td>${ETPR ? fmt1(Math.max(...ETPR)) + ' (max)' : '—'}</td></tr></tfoot>`;
   $('t1c').innerHTML = h;
   $('t1cPer').textContent = lblC + ' · ' + gfLbl();
-  $('h1c').textContent = 'Capa par créneau = capa journalière (modèle RM × poids journaliers) × poids du créneau de la prévision Webhelp ' +
-    '(profil « Lundi au samedi » ou « Dimanche » selon le jour ; activités sans profil dédié : repli profil Hyper). ' +
-    'ETP productif = capa heures ÷ (capa heures hebdo ÷ effectif productif hebdo).';
   $('w1CSrc').textContent = 'Modèle RM : ' + (D.meta.rm2 || (R.meta && R.meta.file) || 'RM') + ' · ' + lblC +
-    ' · ' + nS + ' créneaux 30 min' + (prevHas() && Object.keys(cre).length ? ' · poids créneaux : Prévision Webhelp' : ' · poids créneaux absents : répartition uniforme');
+    ' · ' + (AG === 'h' ? rows.length + ' heures pleines (2 créneaux)' : rows.length + ' créneaux 30 min') +
+    ' · vision ' + tzLbl + (prevHas() && Object.keys(cre).length ? ' · poids créneaux : Prévision Webhelp' : ' · poids créneaux absents : répartition uniforme');
 }
 
 const kpi = (lbl, val, sub, bar) =>
@@ -2137,7 +2183,7 @@ function r3() {
   const hasPlanA = !!(PL && PL.dates && PL.dates.length);
   if (!hasPlanA) {
     $('k3').innerHTML = '<div class="kpi"><div class="lbl">Aucune planification</div><div class="sub">Importez le fichier « Données DASHBOARD CAPA AUCHAN » (feuilles Planning + Skills) : la capa planif provient des heures planifiées hors FIM.</div></div>';
-    $('t3').innerHTML = ''; $('p3Hint').textContent = '';
+    $('t3').innerHTML = '';
     mkChart('c3a', { type: 'bar', data: { labels: [], datasets: [] } });
     mkChart('c3b', { type: 'bar', data: { labels: [], datasets: [] } });
     $('w3Src').textContent = 'Analyse capa : planification à importer';
@@ -2146,7 +2192,7 @@ function r3() {
   const MCA = rmDaily('capa_a'), MCH = rmDaily('capa_hlog');
   if (!MCA.any && !MCH.any) {
     $('k3').innerHTML = '<div class="kpi"><div class="lbl">Capa absente du modèle RM</div><div class="sub">Importez le modèle RM (capa en actes / heures) — la comparaison porte sur capa roadmap vs capa planif.</div></div>';
-    $('t3').innerHTML = ''; $('p3Hint').textContent = '';
+    $('t3').innerHTML = '';
     mkChart('c3a', { type: 'bar', data: { labels: [], datasets: [] } });
     mkChart('c3b', { type: 'bar', data: { labels: [], datasets: [] } });
     return;
@@ -2154,7 +2200,7 @@ function r3() {
   const g = GF.g;
   /* jours analysés = uniquement les jours couverts par la planification */
   const allDays = PL.dates.filter(d => inPer('p3', d));
-  if (!allDays.length) { noPer('p3', 'k3', ['c3a', 'c3b'], 't3'); $('p3Hint').textContent = ''; return; }
+  if (!allDays.length) { noPer('p3', 'k3', ['c3a', 'c3b'], 't3'); return; }
   const kOf = d => g === 'mois' ? mKey(d) : g === 'semaine' ? wLabY(d) : d;
   const keys = [], idxOf = {};
   allDays.forEach(d => { const k = kOf(d); if (!(k in idxOf)) { idxOf[k] = keys.length; keys.push(k); } });
@@ -2255,15 +2301,6 @@ function r3() {
        `<td>${fmt(Math.round(TH))}</td><td>${fmt(Math.round(LH))}</td><td>${fmt(Math.round(HB))}</td>` +
        `<td class="${LH - TH < 0 ? 'neg' : 'pos'}">${fmt(Math.round(LH - TH))}</td></tr></tfoot>`;
   $('t3').innerHTML = h;
-  const notes = [];
-  notes.push('Seuls les jours couverts par la planification sont analysés (' + allDays.length + ' j' +
-    (g !== 'jour' ? ' · granularité ' + g : '') + ') — les jours sans planif sont exclus pour ne pas fausser les écarts.');
-  notes.push('Capa roadmap = capa hebdomadaire du modèle RM répartie par jour selon les poids de la prévision (cf. onglet Roadmap).');
-  notes.push('Capa planif = effectif planifié hors FIM × heure contrat (8 h/jour · 40 h/semaine, 7 h si allaitement — colonne « Allaitement » du Planning), ramené sur la présence et réparti par activité × canal selon la feuille Skills, × (1 − absentéisme RM) ; actes = capa heures × productivité du modèle RM (« Productivité » : Mail Hyper / Mail AFR pour le canal MAIL, Direct (LAD)…) — les hypothèses manuelles saisies ci-dessous sont prioritaires et sauvegardées automatiquement.');
-  if (noAbs.size) notes.push('Absentéisme du modèle RM indisponible pour ' + noAbs.size + ' jour(s) — déduction non appliquée sur ces jours.');
-  if (noProd.size) notes.push('Productivité manquante : ' + [...noProd].join(', ') + ' — renseignez les hypothèses de productivité ci-dessous (elles restent enregistrées après actualisation).');
-  if (noHrs.size) notes.push('Heures roadmap converties via la productivité (section « capa en heures de log » absente pour : ' + [...noHrs].join(', ') + ').');
-  $('p3Hint').textContent = notes.join(' ');
   $('w3Src').textContent = 'Capa roadmap : modèle RM (' + (D.meta.rm2 || (RM && RM.meta && RM.meta.file) || 'RM') + ') × poids de la prévision · Capa planif : ' +
     ((PL.meta && PL.meta.file) || 'planification') + ' (' + allDays.length + ' j)';
   renderProdEd();
@@ -2314,7 +2351,7 @@ function r8() {
 function r8Jour() {
   const P = D.plan;
   const days = P.dates.filter(d => inPer('p8', d));
-  if (!days.length) { noPer('p8', 'k8', ['c8a', 'c8b'], 't8'); $('h8').textContent = '';
+  if (!days.length) { noPer('p8', 'k8', ['c8a', 'c8b'], 't8');
     $('w8JSrc').textContent = 'Planification : aucun jour sur ' + rangeLbl(...perRange()); return; }
   const g = GF.g;
   const combos = planCombos();
@@ -2413,11 +2450,6 @@ function r8Jour() {
        (logAny ? `<td>${fmt(Math.round(logTot))}</td>` : '') +
        `<td>${fmt(Math.round(FM))}</td></tr></tfoot>`;
   $('t8').innerHTML = h;
-  $('h8').textContent = 'Capa en heures = effectif planifié hors FIM × heure contrat (8 h/jour · 40 h/semaine, 7 h si allaitement), ' +
-    'ramenée sur la présence [Shift In, Shift Out) − pause repas puis répartie selon la feuille Skills : ' +
-    'HYPER/DRIVE → 50/50 sur Hyper et Drive × 50/50 sur MAIL et PHONE · ALL → toutes les activités et canaux (uniforme) · ' +
-    'SAV → PHONE uniquement · CHAT → CHAT uniquement · FIM hors prod (exclu). ' +
-    'HP = présence − pause repas (info) · Heures de log réalisées = EXT_Agent (Busy, Wrap Up, Hold, Chat, Panier), hors agents FIM.';
   $('w8JSrc').textContent = 'Planification : ' + ((P.meta && P.meta.file) || 'importée') + ' · ' + days.length + ' j · ' +
     (D.skills && D.skills.by ? Object.keys(D.skills.by).filter(k => k.startsWith('wd:')).length + ' compétences' : 'compétences : lots du Planning') +
     ' · ' + gfLbl();

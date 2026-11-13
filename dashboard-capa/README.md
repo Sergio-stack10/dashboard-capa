@@ -68,6 +68,26 @@ filtres de période).
    - **seuls les jours couverts par la planification sont analysés** (les jours sans planif sont
      exclus pour ne pas fausser les écarts).
 
+## Ventilation de la prévision, fuseau et agrégat horaire (nouveau)
+
+- **Ventilation « Calcul prévision »** — la prévision affichée dans les vues journalière et par
+  créneaux est désormais la **prévision Webhelp** ventilée exactement comme le fichier de calcul :
+  **prévu du MOIS × poids journalier du jour** (Σ poids = 1 par mois × flux) puis **× poids
+  intraday du créneau** (Σ = 1). Repli : prévision finale RM quand un mois/flux n'a pas de
+  prévision Webhelp (signalé dans le KPI). Le QE = capa ÷ prévision Webhelp (repli prévision RM).
+- **Codes créneaux = fin de créneau** — comme dans le fichier de calcul (`P(O) = M(O) + M(O−30)`) :
+  le code 800 couvre **[07:30 → 08:00)** Paris ; l'**heure pleine** « 07:00 » = codes 730 + 800.
+  L'affichage montre toujours l'intervalle complet (ex. « 09:00 → 10:00 »).
+- **Heure Paris → Mada** — la prévision est en heure Paris, le planning en heure Madagascar :
+  un sélecteur **« Heure Paris → Mada »** (vision Mada **+2 h** par défaut, +1 h l'été, ou
+  Paris 0 h) décale les créneaux de la vue par créneaux (prévision **et** capa roadmap) pour
+  les aligner sur le planning. Choix persisté (localStorage).
+- **Agrégat** — sélecteur **« Créneaux 30 min » / « Heures pleines »** : le mode heures pleines
+  somme 2 créneaux consécutifs (13 lignes + le reste de la dernière demi-heure, comme le
+  tableau O-P du fichier). Choix persisté.
+- **Notes retirées** — les blocs de notes / notes de formules sous les tableaux ont été
+  supprimés de toutes les pages.
+
 ## Persistance, productivité et actualisation (nouveau)
 
 - **Sauvegarde automatique** — tout import (et la démo) est enregistré immédiatement dans le
