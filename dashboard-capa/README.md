@@ -88,6 +88,27 @@ filtres de période).
 - **Notes retirées** — les blocs de notes / notes de formules sous les tableaux ont été
   supprimés de toutes les pages.
 
+## Planification : capa en heures de log, congés, exclusions (nouveau)
+
+- **Capa en heures de log** (ex-« capa contrat ») — l'écart entre la Σ répartition par activités
+  et la capa est corrigé : le KPI et la colonne **« Capa en h de log »** comptent désormais les
+  heures de contrat **réellement répartissables** au prorata des compétences retenues par les
+  filtres (activités / canaux). Σ réparti = capa sur chaque jour (vérifié : 2 847 h = 2 847 h sur
+  la période préchargée, écart 0). Le KPI précise les heures hors périmètre (filtres) et les
+  heures non répartissables (présence ou compétence manquante), si elles existent.
+- **Congés** — la colonne **« Congé »** du planning (agents hors planification) est désormais
+  lue : KPI **« Congés »** (heures + agents × jours), colonne « Congé (h) » du tableau
+  journalier et ligne « Congés (h) » du graphique. Données préchargées : 200 h sur 9 jours.
+- **Borne/LSA exclu** — l'activité Borne/LSA est retirée de tous les calculs et visuels :
+  import du modèle (sections non lues), réalisé voix (queues ignorées), heures de log réalisées,
+  filtres et listes d'activités, données de démo.
+- **Noms de fichiers jamais affichés** — l'outil ne montre plus aucun nom de fichier : les
+  sources sont désignées par des termes génériques (« modèle capacitaire », « planification »,
+  « prévision Webhelp », « classeur de planification »).
+- **Superflu retiré** — KPIs redondants avec les graphiques supprimés (effectif productif
+  dernière semaine, absentéisme et taux d'occupation en moyenne, activité dominante) et note
+  d'aide de l'onglet Import retirée.
+
 ## Persistance, productivité et actualisation (nouveau)
 
 - **Sauvegarde automatique** — tout import (et la démo) est enregistré immédiatement dans le
@@ -96,14 +117,14 @@ filtres de période).
   la sauvegarde échouait en silence (cause des pertes constatées). L'entête affiche l'état
   (« Sauvegarde locale active » / « Sauvegardé à HH:MM » / « ⚠ Sauvegarde impossible »).
   « Réinitialiser » efface IndexedDB + localStorage et recharge les données préchargées.
-- **Capa en heures de contrat (Planification)** — la capa en heures n'est plus la présence
+- **Capa en heures de log (Planification)** — la capa en heures n'est plus la présence
   du fichier : elle vaut **effectif planifié hors FIM × heure contrat** (8 h/jour · 40 h/semaine,
   **7 h si allaitement** — colonne « Allaitement » du Planning). Ces heures de contrat sont
   ramenées sur la présence [Shift In, Shift Out) − pause repas au prorata des créneaux, puis
   réparties par activité × canal selon la feuille Skills (Σ créneaux = Σ activités = capa
-  contrat du jour). KPI « Capa en heures (contrat) », colonnes « Allait. » et
-  « Capa contrat (h) » du tableau journalier, ligne « Capa contrat (effectif × 8 h) » du
-  graphique, et sous-onglet créneaux cohérent.
+  en heures de log du jour). KPI « Capa en heures de log », colonnes « Allait. » et
+  « Capa en h de log » du tableau journalier, ligne « Capa en heures de log (effectif × 8 h) »
+  du graphique, et sous-onglet créneaux cohérent.
 - **Capa planif et productivité du roadmap** — la capa planif (onglet Analyse capa) est
   calculée sur ces **heures de contrat** : capa heures × (1 − absentéisme RM) × productivité
   **du modèle RM** (section `Productivité`, valeur hebdomadaire de la semaine concernée),
@@ -136,8 +157,8 @@ Les données du site sont celles des JSON de `data/`. Pour les rafraîchir :
 4. **Deploy** — ⚠️ ne jamais cliquer « Retry deployment » sur un ancien déploiement
    (cela re-déploie l'ancienne version).
 5. Vérification : ouvrir l'URL en **navigation privée** et Ctrl+Shift+R ;
-   la ligne d'entête doit afficher `maj 2026-11-12` et les sources
-   « Données DASHBOARD CAPA AUCHAN.xlsx ».
+   la ligne d'entête doit afficher `maj 2026-11-12` et des libellés de sources génériques
+   (« Modèle capacitaire », « Planification », « Prévision Webhelp ») — jamais de nom de fichier.
 
 En cas de « rien n'a changé » : vérifier dans **Deployments** que la date du déploiement est
 du jour, vérifier que l'URL utilisée correspond bien au compte qui héberge le worker
