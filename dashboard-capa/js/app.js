@@ -1043,7 +1043,7 @@ function whPrevDay(k, c, d) {          // prévision du jour = prévu du mois ×
   if (mv <= 0) return 0;
   const w = ((P.poidsJour || {})[d] || {})[c] || {};
   const wv = w[k];
-  if (wv != null && wv > 0) return mv * wv;
+  if (wv != null) return mv * wv;                     // poids lu (0 = pas de couverture ce jour) ou repli hyper déjà appliqué
   const ds = Object.keys(P.poidsJour || {}).filter(x => x.startsWith(mk));
   const nd = ds.length || new Date(+mk.slice(0, 4), +mk.slice(5, 7), 0).getDate();
   return mv / nd;                                     // poids absent : répartition uniforme
@@ -1092,8 +1092,9 @@ function impPrev(name, buf) {
   for (let r = 0; r < pa.length; r++) {
     const row = pa[r] || []; const d = isoD(row[0]);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || row[1] == null || row.length < 12) continue;
-    jours[d] = { a: { hyper: n2(row[1]), c2e: n2(row[2]), afr: n2(row[3]), drive: n2(row[4]), sav: n2(row[5]), direct: 0 },
-                 m: { hyper: n2(row[9]), c2e: 0, afr: n2(row[10]), drive: n2(row[11]), sav: 0, direct: 0 } };
+    jours[d] = { a: { hyper: n2(row[1]), c2e: n2(row[2]), afr: n2(row[3]), drive: n2(row[4]), sav: n2(row[5]), direct: null },
+                 m: { hyper: n2(row[9]), c2e: null, afr: n2(row[10]), drive: n2(row[11]), sav: null, direct: null } };
+    /* null = pas de colonne dans le fichier (repli profil hyper) — 0 lu = pas de couverture ce jour */
     const mk = d.slice(0, 7);
     if (WDS.includes(norm(row[14])) && row[15] != null) (chat[mk] = chat[mk] || {})[norm(row[14])] = n2(row[15]);
     const sv = row[17];
@@ -1106,10 +1107,40 @@ function impPrev(name, buf) {
     }
   }
   if (!Object.keys(jours).length) throw new Error('Aucun poids journalier lu (onglet Poids)');
+  /* séries « Correctif » : poids journaliers révisés (par date) qui remplacent la série
+     principale du bloc — ex. « Correctif | Hyper | le 04/09 » : poids Hyper d'appels de
+     septembre recalés sur le réalisé (la série initiale était décalée). */
+  const actPrevOf = v => { const t = norm(v);
+    if (t.includes('hyper')) return 'hyper';
+    if (t.includes('c2e')) return 'c2e';
+    if (t.includes('auchan') || t.includes('afr')) return 'afr';
+    if (t.includes('drive')) return 'drive';
+    if (t.includes('sav')) return 'sav';
+    return ''; };
+  let nCorr = 0;
+  for (let r = 0; r < pa.length; r++) {
+    const row = pa[r] || [];
+    const cC = row.findIndex(v => v != null && norm(v) === 'correctif');
+    if (cC < 0) continue;
+    for (let c = cC + 1; c < Math.min(row.length, cC + 6); c++) {
+      const t = row[c] == null ? '' : String(row[c]).trim();
+      if (!t || /^le \d/.test(norm(t)) || isFinite(+t)) continue;   // ignore « le 04/09 » et valeurs
+      const f = actPrevOf(t); if (!f) continue;
+      for (let rr = r + 1; rr < pa.length; rr++) {
+        const rw = pa[rr] || [];
+        const d = isoD(rw[cC]);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !jours[d]) continue;
+        const v = rw[c];
+        if (v == null || !isFinite(+v)) continue;
+        const ck = jours[d].a[f] != null ? 'a' : (jours[d].m[f] != null ? 'm' : null);
+        if (ck) { jours[d][ck][f] = n2(v); nCorr++; }
+      }
+    }
+  }
   /* normalisation Σ = 1 (réconciliation jour→mois et créneau→jour) + repli profil « hyper » */
   const wsum = {};
   Object.entries(jours).forEach(([d, w]) => { const mk = d.slice(0, 7);
-    ['a', 'm'].forEach(c => PACTS.forEach(f => wsum[mk + '|' + c + f] = (wsum[mk + '|' + c + f] || 0) + w[c][f])); });
+    ['a', 'm'].forEach(c => PACTS.forEach(f => wsum[mk + '|' + c + f] = (wsum[mk + '|' + c + f] || 0) + (w[c][f] || 0))); });
   Object.entries(jours).forEach(([d, w]) => { const mk = d.slice(0, 7);
     ['a', 'm'].forEach(c => PACTS.forEach(f => { const s = wsum[mk + '|' + c + f];
       if (s > 0) w[c][f] = Math.round(w[c][f] / s * 1e6) / 1e6; })); });
@@ -1134,6 +1165,7 @@ function impPrev(name, buf) {
              mois, poidsJour: jours, poidsChat: chat, creneaux: cre };
   D.meta.prev = name;
   return Object.keys(mois).length + ' mois de prévus · ' + Object.keys(jours).length + ' jours pondérés · créneaux 30 min' +
+    (nCorr ? ' · ' + nCorr + ' poids corrigés' : '') +
     (snap ? ' · prévision au ' + dShort(snap) : '');
 }
 
@@ -2127,16 +2159,22 @@ function prevKeyOfAct(act) {                        // (canal 'a'|'m', clé du p
     for (const f of ['hyper', 'afr', 'drive', 'direct']) if (s.includes(f)) return ['m', f];
     return null;
   }
-  if (s.includes('chat') || s.includes('borne') || s.includes('lsa')) return null;
+  if (s.includes('chat')) return ['c', 'chat'];    // poids Chat : profil par jour de semaine (lundi au samedi)
+  if (s.includes('borne') || s.includes('lsa')) return null;
   for (const f of ['hyper', 'c2e', 'afr', 'drive', 'sav', 'direct']) if (s.includes(f)) return ['a', f];
   return null;
 }
 function rmWeekRawW(d, pk) {                        // poids brut du jour (repli profil hyper du canal)
+  if (!pk) return 0;
+  if (pk[0] === 'c') {                              // Chat : poids du jour de semaine (lundi au samedi)
+    const wc = ((D.prev && D.prev.poidsChat) || {})[mKey(d)];
+    return wc ? (wc[jJours(d).toLowerCase()] || 0) : 0;
+  }
   const w = D.prev && D.prev.poidsJour ? D.prev.poidsJour[d] : null;
-  if (!w || !pk) return 0;
-  const x = (w[pk[0]] || {})[pk[1]];
-  if (x > 0) return x;
-  return (w[pk[0]] || {}).hyper > 0 ? w[pk[0]].hyper : 0;
+  if (!w) return 0;
+  const col = w[pk[0]] || {};
+  if (col[pk[1]] != null) return col[pk[1]];        // poids lu du fichier (0 = pas de couverture ce jour)
+  return col.hyper > 0 ? col.hyper : 0;             // activité sans colonne : profil hyper du canal
 }
 function rmDaily(sec) {                             // matrice journalière d'une section hebdo du RM
   const out = { dates: rmDays(), by: {}, any: false };
@@ -2433,7 +2471,9 @@ function r8Jour() {
         (CTRall - CTR > 0.5 ? ' · ' + fmt(Math.round(CTRall - CTR)) + ' h hors périmètre' : '') +
         (CTRoff > 0.5 ? ' · ' + fmt(Math.round(CTRoff)) + ' h non répartissables' : '')) +
     kpi('Congés', fmt(Math.round(CGH)) + ' h', CGN ? CGN + ' agent(s) × jour(s) en congé' : 'aucune donnée congé') +
-    kpi('Heures planifiées (HP)', fmt(Math.round(HP)) + ' h', 'présence − pause repas · hors pause ' + fmt(Math.round(RP)) + ' h') +
+    kpi('Heures planifiées (HP)', fmt(Math.round(HP)) + ' h',
+        'présence − pause repas · hors pause ' + fmt(Math.round(RP)) + ' h' +
+        (FM > 0 ? ' · dont FIM ' + fmt(Math.round(FM)) + ' h' : '')) +
     (logAny ? kpi('Heures de log réalisées', fmt(Math.round(logTot)) + ' h', 'Busy · Wrap Up · Hold · Chat · Panier') : '');
   /* graphique 1 : heures par activité (canaux fusionnés) + HP + log réalisé */
   const { keys, idx } = aggBy(days, g);

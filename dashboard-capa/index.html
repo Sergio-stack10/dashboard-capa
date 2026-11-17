@@ -385,9 +385,11 @@ heures de log réalisées et réalisés Phone / Mail) — les données importée
         <label>Choisir le fichier<input type="file" id="fRoad" accept=".xlsm,.xlsx,.xls"></label>
         <span class="st" id="stRoad"></span></div>
       <div class="imp"><b>Prévision Webhelp — jour &amp; 30 min</b>
-        <p>Classeur .xlsx : onglet <code>2026</code> (prévus mensuels par flux) + onglet <code>Poids</code> (poids journaliers,
-        poids par jour de semaine et créneaux 30 min — colonne R, format 730 = 07:30). Sert à la répartition journalière
-        et par créneau du capacitaire (onglet Roadmap).</p>
+        <p>Classeur .xlsx : onglet <code>2026</code> (prévus mensuels par flux) + onglet <code>Poids</code>
+        (poids journaliers <b>par date et par activité</b> pour Appels et Mails, profil Chat
+        <b>lundi au samedi</b>, séries « Correctif » par date, poids par créneaux 30 min — codes
+        800 = [07:30 → 08:00)). Sert à la ventilation journalière et par créneau de la prévision
+        et de la capa roadmap (onglet Roadmap).</p>
         <label>Choisir le fichier<input type="file" id="fPrev" accept=".xlsx,.xlsm,.xls"></label>
         <span class="st" id="stPrev"></span></div>
       <div class="imp" style="grid-column:1/-1"><b>Planification &amp; réalisation</b>

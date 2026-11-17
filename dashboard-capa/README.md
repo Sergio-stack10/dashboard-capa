@@ -88,6 +88,30 @@ filtres de période).
 - **Notes retirées** — les blocs de notes / notes de formules sous les tableaux ont été
   supprimés de toutes les pages.
 
+## Ventilation conforme à la feuille « Poids » (nouveau)
+
+La ventilation de la **prévision** et de la **capa roadmap** par jour respecte désormais
+exactement la feuille « Poids » du classeur de prévision :
+
+- **Poids journaliers par date × activité** — Appel (Hyper, C2E, Auchan.fr, Drive, SAV) et
+  Mail (Hyper, Auchan.fr, Drive) : chaque jour du mois a son propre poids (Σ = 1 par mois ×
+  activité), utilisé pour spliter le prévu mensuel **et** pour répartir la capa hebdo du
+  modèle capacitaire par jour.
+- **Séries « Correctif »** — les poids révisés du fichier (ex. « Correctif | Hyper | le 04/09 » :
+  poids d'appels Hyper de septembre recalés sur le réalisé, la série initiale étant décalée
+  d'un jour) **remplacent** la série principale, par date (30 poids corrigés sur les données
+  préchargées).
+- **Poids Chat « Lundi au samedi »** — la capa roadmap Chat est répartie selon le profil par
+  jour de semaine de la feuille Poids (Σ = 1 du lundi au samedi, **aucune capa le dimanche**)
+  au lieu d'une répartition uniforme.
+- **Poids « 0 explicite » respectés** — un poids lu à 0 dans le fichier (ex. SAV appels le
+  dimanche) est appliqué tel quel : ni capa ni prévision ce jour-là. Le repli « profil hyper »
+  ne s'applique qu'aux activités **sans colonne** dans le fichier (ex. Direct), et de façon
+  identique pour la prévision journalière et la capa roadmap (replis alignés).
+- **Invariants vérifiés** — Σ capa journalière = Σ capa hebdo du modèle pour les 113 semaines
+  × 7 activités (791 cas, 0 écart) ; Σ poids par mois = 1 pour chaque activité.
+- `data/prevision.json` préchargé régénéré avec le code d'import réel (correctifs appliqués).
+
 ## Planification : capa en heures de log, congés, exclusions (nouveau)
 
 - **Capa en heures de log** (ex-« capa contrat ») — l'écart entre la Σ répartition par activités
