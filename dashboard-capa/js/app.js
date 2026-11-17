@@ -1193,22 +1193,23 @@ function afterImport(page) {
 /* =====================================================================
    AMORÇAGE
    ===================================================================== */
-async function loadPreloaded() {                     // fichiers statiques du dépôt — ne remplace jamais les données importées
+async function loadPreloaded() {                     // données intégrées (window.__PRELOAD) sinon fichiers du dépôt
+  const PK = (typeof window !== 'undefined' && window.__PRELOAD) || {};
+  const jOf = async (k, f) => {
+    if (PK[k]) return PK[k];
+    try { return await (await fetch(f, { cache: 'no-store' })).json(); } catch (e) { return null; }
+  };
   if (!D.rm2) {                                                     // modèle RM : 1 fichier dédié
-    try {
-      D.rm2 = await (await fetch('data/roadmap.json', { cache: 'no-store' })).json();
-      if (D.rm2 && D.rm2.meta && D.rm2.meta.file) D.meta.rm2 = D.rm2.meta.file;
-    } catch (e) { D.rm2 = null; }
+    const J = await jOf('roadmap', 'data/roadmap.json');
+    if (J) { D.rm2 = J; if (D.rm2.meta && D.rm2.meta.file) D.meta.rm2 = D.rm2.meta.file; }
   }
   if (!D.prev) {                                                    // prévision Webhelp : 1 fichier dédié
-    try {
-      D.prev = await (await fetch('data/prevision.json', { cache: 'no-store' })).json();
-      if (D.prev && D.prev.meta && D.prev.meta.file) D.meta.prev = D.prev.meta.file;
-    } catch (e) { D.prev = null; }
+    const J = await jOf('prevision', 'data/prevision.json');
+    if (J) { D.prev = J; if (D.prev.meta && D.prev.meta.file) D.meta.prev = D.prev.meta.file; }
   }
   if (!D.plan || !D.plan.rows || !D.skills) {                       // classeur de planification (plan + compétences + réalisation)
-    try {
-      const J = await (await fetch('data/dashcapa.json', { cache: 'no-store' })).json();
+    const J = await jOf('dashcapa', 'data/dashcapa.json');
+    if (J) {
       if (!D.plan || !D.plan.rows) {
         D.plan = J.plan || null;
         if (D.plan && D.plan.meta && D.plan.meta.file) D.meta.planA = D.plan.meta.file;
@@ -1224,7 +1225,7 @@ async function loadPreloaded() {                     // fichiers statiques du d�
       if (D.mail && (!D.mail.dates || !D.mail.dates.length) && J.mail) {
         D.mail = J.mail; if (J.mail.meta && J.mail.meta.file) D.meta.mail = J.mail.meta.file;
       }
-    } catch (e) { /* fichier absent : données à importer */ }
+    }
   }
 }
 async function boot() {
@@ -1233,8 +1234,9 @@ async function boot() {
     if (s) D = typeof s === 'string' ? JSON.parse(s) : s;
   } catch (e) { /* ignoré */ }
   if (!D) {
-    try { D = await (await fetch('data/data.json', { cache: 'no-store' })).json(); }
-    catch (e) { D = emptyData(); }
+    const PK = (typeof window !== 'undefined' && window.__PRELOAD) || {};
+    if (PK.data) { try { D = PK.data; } catch (e) { D = emptyData(); } }
+    else { try { D = await (await fetch('data/data.json', { cache: 'no-store' })).json(); } catch (e) { D = emptyData(); } }
   }
   ensure();
   await loadPreloaded();

@@ -3,6 +3,15 @@
 Application 100 % statique (HTML/CSS/JS vanilla + Chart.js 4.4.1 + SheetJS via CDN), sans build.
 Déploiement : Cloudflare Workers (déploiement manuel par upload d'assets).
 
+## Ouverture locale (nouveau)
+
+**Double-cliquez sur `index.html`** (extrayez le zip d'abord) : les données préchargées
+(RM, prévision Webhelp avec correctifs de la feuille « Poids », planification) sont
+**intégrées au fichier** — aucun serveur n'est nécessaire. Un serveur statique reste
+utile pour l'actualisation des fichiers `data/*.json` (bouton « ↻ Actualiser »), sinon
+les données intégrées font foi. Attention : n'utilisez que le zip le plus récent
+(les anciens zips contiennent une ancienne interface et d'anciennes données).
+
 ## Contenu du dépôt
 
 | Fichier | Rôle |
