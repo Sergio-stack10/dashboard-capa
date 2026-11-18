@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Dashboard capacitaire – Roadmap Auchan (v13)</title>
+<title>Dashboard capacitaire – Roadmap Auchan (v14)</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNGM2ZWY1Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzM2NGZjNyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9InVybCgjZykiLz4KICA8cmVjdCB4PSIxMyIgeT0iMzIiIHdpZHRoPSI5IiBoZWlnaHQ9IjE4IiByeD0iMi41IiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIuNyIvPgogIDxyZWN0IHg9IjI3LjUiIHk9IjI0IiB3aWR0aD0iOSIgaGVpZ2h0PSIyNiIgcng9IjIuNSIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iLjkiLz4KICA8cmVjdCB4PSI0MiIgeT0iMTUiIHdpZHRoPSI5IiBoZWlnaHQ9IjM1IiByeD0iMi41IiBmaWxsPSIjZmZkNDNiIi8+Cjwvc3ZnPgo=">
 <meta name="theme-color" content="#3b5bdb">
 <script>
@@ -118,6 +118,7 @@ nav.tabs .badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radi
 .psrc.none{color:#e8590c}
 .savest{font-size:11px;color:var(--mut);align-self:center;white-space:nowrap}
 .savest.err{color:#e03131;font-weight:700}
+#socleSt.err{color:#e03131;border-color:#e03131}
 .refbtn{margin-left:auto;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--card);color:var(--pri);font:inherit;font-weight:600;font-size:12px;padding:6px 13px;border-radius:8px;cursor:pointer;flex:none}
 .refbtn:hover{border-color:var(--pri)}
 .refbtn:disabled{opacity:.55;cursor:wait}
@@ -223,7 +224,7 @@ footer.pfoot{padding:6px 20px 26px;font-size:11.5px;color:var(--mut)}
 <body>
 
 <header class="top">
-  <div class="brand"><h1>Dashboard capacitaire</h1><span class="sub">Roadmap Auchan</span><span class="ver">v13 · 2026-11-18</span></div>
+  <div class="brand"><h1>Dashboard capacitaire</h1><span class="sub">Roadmap Auchan</span><span class="ver">v14 · 2026-11-18</span><span class="ver" id="socleSt" title="Sections de données intégrées au fichier. « Socle 9/9 ✓ » = fichier complet correctement déployé ; « 0/9 ⚠ » = fichier tronqué ou ancien paquet."></span></div>
   <div id="srcLine">Chargement des données…</div>
   <div class="top-actions">
     <span class="savest" id="saveSt" title="Sauvegarde automatique locale (IndexedDB) — vos données et hypothèses restent après actualisation de la page"></span>
@@ -1699,10 +1700,10 @@ function afterImport(page) {
    ===================================================================== */
 async function loadPreloaded() {                     // données intégrées (window.__PRELOAD) sinon fichiers du dépôt
   const PK = (typeof window !== 'undefined' && window.__PRELOAD) || {};
-  const jOf = async (k, f) => {
-    if (PK[k]) return PK[k];
-    try { return await (await fetch(f, { cache: 'no-store' })).json(); } catch (e) { return null; }
-  };
+  /* Fichier autoportant : le socle est entièrement intégré, AUCUNE requête réseau ni
+     fichier externe n'est chargé. Un déploiement ne peut plus « se remettre à 0 » parce
+     qu'un fichier annexe manque : il n'y en a aucun. */
+  const jOf = async k => PK[k] || null;
   if (!D.rm2 || !D.rm2.weeks || !D.rm2.weeks.length) {              // modèle RM absent ou vide
     const J = await jOf('roadmap', 'data/roadmap.json');
     if (J) { D.rm2 = J; if (D.rm2.meta && D.rm2.meta.file) D.meta.rm2 = D.rm2.meta.file; }
@@ -1735,6 +1736,7 @@ async function loadPreloaded() {                     // données intégrées (wi
     const J = await jOf('conseillers', 'data/conseillers.json');
     if (J) D.con = J;
   }
+  renderSocleSt();
 }
 /* ---------- p9 : analyse par conseiller — « Par agent » / « Par jour » ---------- */
 const esc9 = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -1848,6 +1850,27 @@ function renderCon() {
 }
 RENDERS.p9 = renderCon;
 
+function renderSocleSt() {                     // pastille « Socle X/9 » : diagnostic du fichier déployé
+  const PK = (typeof window !== 'undefined' && window.__PRELOAD) || {};
+  const soc = emptyData();
+  if (PK.data && PK.data.meta) soclePutMeta(soc, PK.data);
+  if (PK.roadmap) soc.rm2 = PK.roadmap;
+  if (PK.prevision) soc.prev = PK.prevision;
+  if (PK.dashcapa) { soc.plan = PK.dashcapa.plan || null; soc.skills = PK.dashcapa.skills || null;
+    soc.logR = PK.dashcapa.logR || null; soc.real = PK.dashcapa.real || null;
+    soc.dmt = PK.dashcapa.dmt || null; soc.mail = PK.dashcapa.mail || null; }
+  if (PK.conseillers) soc.con = PK.conseillers;
+  const sc = dataScore(soc), el = $('socleSt');
+  if (!el) return sc;
+  el.textContent = 'Socle ' + sc + '/9' + (sc === 9 ? ' ✓' : ' ⚠');
+  el.className = 'ver' + (sc === 9 ? '' : ' err');
+  el.title = sc === 9
+    ? 'Fichier complet : les 9 sections de données sont intégrées. Ce fichier déployé est le bon.'
+    : "⚠ Le socle intégré est incomplet (" + sc + "/9) : le fichier déployé est tronqué ou ce n'est pas la dernière version. Re-déployez index.html ENTIER (fichier unique autoportant).";
+  return sc;
+}
+function soclePutMeta(soc, PD) { if (PD && PD.meta) soc.meta = Object.assign(soc.meta || {}, PD.meta); }
+
 function dataScore(X) {                        // complétude des données (nb de sections utiles)
   if (!X || typeof X !== 'object') return 0;
   let n = 0;
@@ -1888,6 +1911,7 @@ async function boot() {
   }
   if (PK.conseillers) socle.con = PK.conseillers;
   D = dataScore(socle) > dataScore(saved) ? socle : (saved || socle);
+  renderSocleSt();                                             // diagnostic visible dans l'en-tête
   ensure();
   await loadPreloaded();
   if (D.plan && D.plan.rows && !D.plan.byAct) buildPlanExtras();    // répartition skills des données préchargées

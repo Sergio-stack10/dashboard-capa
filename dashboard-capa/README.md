@@ -227,9 +227,13 @@ Les données du site sont celles des JSON de `data/`. Pour les rafraîchir :
 
 L'outil est **entièrement contenu dans index.html** : CSS, Chart.js, XLSX, application et
 **toutes les données préchargées** (roadmap, prévision, planification, réalisé, DMT, mail,
-réalisé par conseiller). Aucun fichier annexe, aucune dépendance réseau.
+réalisé par conseiller). Aucun fichier annexe, aucune dépendance réseau : **aucune requête
+n'est envoyée** (le chargement de repli par fetch a été supprimé en v14).
 - Déployez index.html seul (intranet, SharePoint, Netlify, clé USB…) : il ne peut plus y
   avoir de « remise à 0 » liée à des fichiers manquants.
+- **Vérification après déploiement** : en haut à droite, la pastille **« Socle 9/9 ✓ »**
+  doit apparaître. Si elle affiche **« Socle 0/9 ⚠ »** (en rouge), le fichier déployé est
+  tronqué ou ce n'est pas la bonne version : re-déployez index.html ENTIER.
 - Au démarrage, l'outil compare l'état sauvegardé du navigateur (IndexedDB) au socle intégré
   et **garde la source la plus complète** : un état vide ou corrompu ne peut plus masquer
   les données ; les saisies de l'utilisateur restent prioritaires.
