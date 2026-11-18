@@ -223,6 +223,20 @@ Les données du site sont celles des JSON de `data/`. Pour les rafraîchir :
 1. soit importer les nouveaux fichiers via le bouton **Importer** puis **Exporter data.json** ;
 2. soit régénérer les JSON en local avec les scripts de `scripts/` et pousser le dépôt.
 
+## Déploiement — UN SEUL FICHIER
+
+L'outil est **entièrement contenu dans index.html** : CSS, Chart.js, XLSX, application et
+**toutes les données préchargées** (roadmap, prévision, planification, réalisé, DMT, mail,
+réalisé par conseiller). Aucun fichier annexe, aucune dépendance réseau.
+- Déployez index.html seul (intranet, SharePoint, Netlify, clé USB…) : il ne peut plus y
+  avoir de « remise à 0 » liée à des fichiers manquants.
+- Au démarrage, l'outil compare l'état sauvegardé du navigateur (IndexedDB) au socle intégré
+  et **garde la source la plus complète** : un état vide ou corrompu ne peut plus masquer
+  les données ; les saisies de l'utilisateur restent prioritaires.
+- Les boutons « Démo » et « Réinitialiser » ont été retirés : aucune action de l'interface
+  ne peut effacer les données.
+- Une sauvegarde vide est refusée (garde-fou anti-écrasement du socle).
+
 ## Déploiement Cloudflare (manuel)
 
 1. Ouvrir le dashboard Cloudflare → **Workers & Pages** → worker `dashboard-capa`.
