@@ -3,6 +3,17 @@
 Application 100 % statique (HTML/CSS/JS vanilla + Chart.js 4.4.1 + SheetJS via CDN), sans build.
 Déploiement : Cloudflare Workers (déploiement manuel par upload d'assets).
 
+## Boutons supprimés, badge de version (nouveau)
+
+Les boutons **« Réinitialiser »** et **« Démo »** (interface et options d'import) sont
+**retirés** : aucune action de l'interface ne peut effacer les données. « Démo » écrasait
+et sauvegardait des données fictives ; « Réinitialiser » vidait la sauvegarde locale — sur
+une ancienne version sans données intégrées, cela donnait un outil vide. La seule « remise
+à niveau » est le rechargement du **socle injecté** : au démarrage (données intégrées) ou
+via les boutons **« ↻ Actualiser »** des onglets, qui rechargent les données préchargées
+sans toucher aux données importées. L'en-tête affiche un **badge de version** (ex.
+« v10 · 2026-11-17 ») : si vous ne le voyez pas, vous êtes sur un ancien fichier.
+
 ## Ouverture locale (nouveau)
 
 **Double-cliquez sur `index.html`** (extrayez le zip d'abord) : les données préchargées

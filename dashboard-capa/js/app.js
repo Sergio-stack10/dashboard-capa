@@ -1254,12 +1254,8 @@ function bindUI() {
   $('bImpClose').addEventListener('click', () => $('imp').close());
   $('bExp').addEventListener('click', dlJSON);
   $('bExp2').addEventListener('click', dlJSON);
-  $('bDemo').addEventListener('click', demo);
-  $('bDemo2').addEventListener('click', demo);
-  $('bReset').addEventListener('click', async () => {
-    if (!confirm('Effacer les données locales et recharger les données préchargées ?')) return;
-    await storeDel(); location.reload();
-  });
+  /* boutons « Démo » et « Réinitialiser » retirés : aucune action de l'interface ne peut
+     effacer les données ; le socle reste les données injectées (boot ou « ↻ Actualiser »). */
   document.querySelectorAll('.refbtn').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true; b.classList.add('busy');
     const old = b.innerHTML;
