@@ -3,6 +3,18 @@
 Application 100 % statique (HTML/CSS/JS vanilla + Chart.js 4.4.1 + SheetJS via CDN), sans build.
 Déploiement : Cloudflare Workers (déploiement manuel par upload d'assets).
 
+## Onglet « Analyse par conseiller » (nouveau)
+
+5ᵉ onglet de la barre : tableau au **format de la feuille « Planning »** du classeur
+DASHBOARD CAPA AUCHAN (lignes = conseillers avec équipe et matricule, colonnes = jours,
+cellule = créneau planifié ; survol : heures, pauses, lot). Colonnes ajoutées :
+**contacts reçus, contacts traités, heures de traitement (communication + ACW),
+heures de log et CPH = traités / heure de log**. Le fichier source mesure le réalisé
+par flux et par jour : ces valeurs sont ventilées par conseiller au prorata des heures
+planifiées de chaque journée (méthode rappelée sous le tableau). Filtre de recherche
+(nom, équipe, matricule), cellules commutables créneau / heures planifiées, totaux en
+pied de tableau (contrôle : Σ reçus = 16 615, Σ traités = 14 059, CPH global 7,34).
+
 ## Boutons supprimés, badge de version (nouveau)
 
 Les boutons **« Réinitialiser »** et **« Démo »** (interface et options d'import) sont

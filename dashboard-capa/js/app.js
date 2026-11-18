@@ -1228,6 +1228,96 @@ async function loadPreloaded() {                     // données intégrées (wi
     }
   }
 }
+/* ---------- p9 : analyse par conseiller (format feuille « Planning ») ---------- */
+const esc9  = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const mHM   = m => (m == null || isNaN(m)) ? '—' : String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(Math.round(m % 60)).padStart(2, '0');
+const dShort9 = d => { const dt = new Date(d + 'T00:00:00');
+  return JJ[dt.getDay()].slice(0, 3) + ' ' + String(dt.getDate()).padStart(2, '0') + '/' + String(dt.getMonth() + 1).padStart(2, '0'); };
+let CONM = null;
+
+function conData() {                     // plan par conseiller + réalisé ventilé au prorata des HP du jour
+  const plan = D.plan || {}, dates = plan.dates || [], rows = plan.rows || [];
+  const ags = {};
+  rows.forEach(r => {
+    const A = ags[r.ag] || (ags[r.ag] = { wd: r.wd || '', eq: String(r.ag).split(/\s+/).slice(1).join(' ') || '—', c: {}, hpT: 0 });
+    A.c[r.d] = r; A.hpT += r.hp || 0;
+  });
+  const hpJ = {}; dates.forEach(d => { hpJ[d] = 0; for (const a in ags) if (ags[a].c[d]) hpJ[d] += ags[a].c[d].hp || 0; });
+  const recJ = {}, trJ = {}, htrJ = {}, hlogJ = {};
+  dates.forEach(d => {
+    const i = ((D.real && D.real.dates) || []).indexOf(d);
+    recJ[d] = i >= 0 ? Object.values(D.real.f).reduce((s, v) => s + (v.r[i] || 0), 0) : 0;
+    trJ[d]  = i >= 0 ? Object.values(D.real.f).reduce((s, v) => s + (v.t[i] || 0), 0) : 0;
+    const di = ((D.dmt && D.dmt.dates) || []).indexOf(d);
+    htrJ[d] = di >= 0 ? Object.values(D.dmt.f).reduce((s, v) => s + ((v.com[di] || 0) + (v.acw[di] || 0)), 0) / 3600 : 0;
+    const li = ((D.logR && D.logR.dates) || []).indexOf(d);
+    hlogJ[d] = li >= 0 ? (((D.logR.h || {}).tot) || [])[li] || 0 : 0;
+  });
+  const list = Object.keys(ags).sort((x, y) => x.localeCompare(y, 'fr')).map(a => {
+    const A = ags[a]; let rec = 0, tr = 0, htr = 0, hlog = 0;
+    dates.forEach(d => { const c = A.c[d]; if (!c) return; const P = hpJ[d]; if (!P) return;
+      const k = (c.hp || 0) / P; rec += recJ[d] * k; tr += trJ[d] * k; htr += htrJ[d] * k; hlog += hlogJ[d] * k; });
+    return { ag: a, wd: A.wd, eq: A.eq, hpT: A.hpT, rec, tr, htr, hlog, cph: hlog ? tr / hlog : 0, c: A.c };
+  });
+  const T = list.reduce((o, x) => { o.hpT += x.hpT; o.rec += x.rec; o.tr += x.tr; o.htr += x.htr; o.hlog += x.hlog; return o; },
+    { hpT: 0, rec: 0, tr: 0, htr: 0, hlog: 0 });
+  T.cph = T.hlog ? T.tr / T.hlog : 0;
+  return { dates, list, tot: T };
+}
+
+function renderCon() {
+  CONM = conData(); renderConTable();
+  const n = $('conNote');
+  if (n) n.innerHTML = 'Méthode — le fichier source mesure le réalisé (contacts reçus, traités, temps de communication + ACW, '
+    + 'heures de log) <b>par flux et par jour</b>, pas par conseiller : ces valeurs sont donc ventilées par conseiller '
+    + 'au prorata des heures planifiées de chaque journée. <b>CPH (contacts per hour) = contacts traités / heure de log.</b> '
+    + 'Périmètre : canal téléphonique du fichier réalisé (le mail est traité dans les onglets dédiés). '
+    + 'Cellule planning : créneau de présence planifié (survol : pauses, lot, indicateurs du fichier).';
+}
+
+function renderConTable() {
+  const el = $('tCon'); if (!el) return;
+  if (!CONM || !CONM.list.length) {
+    el.innerHTML = '<tr><th style="text-align:left">Aucune donnée de planification — importez le classeur ou utilisez « ↻ Actualiser »</th></tr>';
+    return;
+  }
+  const q = norm((($('conQ') || {}).value) || '');
+  const mode = (($('conCell') || {}).value) || 'cre';
+  const list = CONM.list.filter(x => !q || norm(x.ag + ' ' + x.wd + ' ' + x.eq).includes(q));
+  let h = '<thead><tr><th class="cfirst" rowspan="2">Conseiller</th>';
+  CONM.dates.forEach(d => { h += '<th>' + dShort9(d) + '</th>'; });
+  h += '<th rowspan="2" title="Somme des heures planifiées de la période">HP</th>'
+     + '<th rowspan="2" class="addc">Reçus</th><th rowspan="2" class="addc">Traités</th>'
+     + '<th rowspan="2" class="addc" title="Communication + ACW, ventilé">H. traitement</th>'
+     + '<th rowspan="2" class="addc" title="Heures de log, ventilées">H. de log</th>'
+     + '<th rowspan="2" class="addc" title="CPH = contacts traités / heure de log">CPH</th></tr></thead><tbody>';
+  list.forEach(x => {
+    h += '<tr><td class="cfirst">' + esc9(String(x.ag).split(/\s+/)[0])
+       + '<span class="sub2">' + esc9(x.eq) + (x.wd ? ' · ' + esc9(x.wd) : '') + '</span></td>';
+    CONM.dates.forEach(d => {
+      const c = x.c[d];
+      if (!c) { h += '<td class="cre empty">—</td>'; return; }
+      const t = JJ[new Date(d + 'T00:00:00').getDay()] + ' ' + dShort9(d).slice(4) + ' : ' + fmt1(c.hp)
+        + ' h planifiées' + (c.r1 || c.r2 ? ' · pauses ' + mHM(c.r1) + ' / ' + mHM(c.r2) : '')
+        + (c.lot ? ' · ' + esc9(c.lot) : '') + (c.al ? ' · al=1' : '');
+      h += '<td class="cre' + (c.al ? ' al1' : '') + '" title="' + t + '">'
+         + (mode === 'hp' ? fmt1(c.hp) : mHM(c.sin) + '–' + mHM(c.sout)) + '</td>';
+    });
+    h += '<td>' + fmt1(x.hpT) + '</td><td class="addc">' + fmt(x.rec) + '</td><td class="addc">' + fmt(x.tr)
+       + '</td><td class="addc">' + fmt1(x.htr) + '</td><td class="addc">' + fmt1(x.hlog)
+       + '</td><td class="addc"><b>' + fmt1(x.cph) + '</b></td></tr>';
+  });
+  const T = CONM.tot;
+  h += '<tr class="cTot"><td class="cfirst">Totaux · ' + list.length + ' conseiller(s)</td>';
+  CONM.dates.forEach(d => { let s2 = 0; list.forEach(x => { if (x.c[d]) s2 += x.c[d].hp || 0; }); h += '<td>' + fmt1(s2) + '</td>'; });
+  h += '<td>' + fmt1(T.hpT) + '</td><td class="addc">' + fmt(T.rec) + '</td><td class="addc">' + fmt(T.tr)
+     + '</td><td class="addc">' + fmt1(T.htr) + '</td><td class="addc">' + fmt1(T.hlog)
+     + '</td><td class="addc"><b>' + fmt1(T.cph) + '</b></td></tr>';
+  h += '</tbody>';
+  el.innerHTML = h;
+}
+RENDERS.p9 = renderCon;
+
 async function boot() {
   try {
     const s = await storeGet();                                     // IndexedDB, repli localStorage
@@ -1252,6 +1342,8 @@ function bindUI() {
   document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.p)));
   $('bImp').addEventListener('click', () => $('imp').showModal());
   $('bImpClose').addEventListener('click', () => $('imp').close());
+  $('conQ').addEventListener('input', () => renderConTable());
+  $('conCell').addEventListener('change', () => renderConTable());
   $('bExp').addEventListener('click', dlJSON);
   $('bExp2').addEventListener('click', dlJSON);
   /* boutons « Démo » et « Réinitialiser » retirés : aucune action de l'interface ne peut
@@ -1504,6 +1596,7 @@ function perBounds(p) {                                            // bornes de 
     case 'p5': { const d = [...D.real.dates, ...D.mail.dates].filter(Boolean).sort();
                  return d.length ? [d[0], d[d.length - 1]] : []; }
     case 'p8': { const d = (D.plan && D.plan.dates) || []; return d.length ? [d[0], d[d.length - 1]] : []; }
+    case 'p9': { const d = (D.plan && D.plan.dates) || []; return d.length ? [d[0], d[d.length - 1]] : []; }
   }
   return [];
 }
