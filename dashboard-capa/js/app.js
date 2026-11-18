@@ -1227,94 +1227,120 @@ async function loadPreloaded() {                     // données intégrées (wi
       }
     }
   }
+  if (!D.con) {                                                     // réalisé par conseiller (EXT_Entrant + EXT_Agent)
+    const J = await jOf('conseillers', 'data/conseillers.json');
+    if (J) D.con = J;
+  }
 }
-/* ---------- p9 : analyse par conseiller (format feuille « Planning ») ---------- */
-const esc9  = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-const mHM   = m => (m == null || isNaN(m)) ? '—' : String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(Math.round(m % 60)).padStart(2, '0');
-const dShort9 = d => { const dt = new Date(d + 'T00:00:00');
-  return JJ[dt.getDay()].slice(0, 3) + ' ' + String(dt.getDate()).padStart(2, '0') + '/' + String(dt.getMonth() + 1).padStart(2, '0'); };
-let CONM = null;
+/* ---------- p9 : analyse par conseiller — « Par agent » / « Par jour » ---------- */
+const esc9 = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const f2 = n => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n || 0);
+let P9V = 'agent';
+const isC = k => k === 'rec' || k === 'tra';
+const uN = k => isC(k) ? '' : ' h';
+const uF = (k, v) => isC(k) ? fmt(v) : fmt1(v);
 
-function conData() {                     // plan par conseiller + réalisé ventilé au prorata des HP du jour
-  const plan = D.plan || {}, dates = plan.dates || [], rows = plan.rows || [];
-  const ags = {};
-  rows.forEach(r => {
-    const A = ags[r.ag] || (ags[r.ag] = { wd: r.wd || '', eq: String(r.ag).split(/\s+/).slice(1).join(' ') || '—', c: {}, hpT: 0 });
-    A.c[r.d] = r; A.hpT += r.hp || 0;
+function p9sub(v) {
+  P9V = v;
+  document.querySelectorAll('#p9subs button[data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  const a = $('p9vAgent'), j = $('p9vJour');
+  if (a) a.style.display = v === 'agent' ? '' : 'none';
+  if (j) j.style.display = v === 'jour' ? '' : 'none';
+}
+
+function cohHtml() {                     // bandeau de cohérence : réconciliation + couverture
+  const c = (D.con || {}).coh;
+  if (!c) return '<div class="cohL"><i>Données par conseiller absentes — utilisez « ↻ Actualiser ».</i></div>';
+  const cv = c.couv, K = ['rec', 'tra', 'htr', 'log', 'hp'];
+  const sumB = k => { const i = { rec: 0, tra: 1, htr: 2 }[k];
+    return cv.prodPlanning[i] + cv.prodHorsPlanningJour[i] + cv.agentFIM[i] + cv.vide[i]; };
+  const l1 = K.map(k => {
+    const t = c[k], tot = k === 'hp' ? t.src : (k === 'log' ? t.src + cv.logHorsJour[0] : sumB(k));
+    const oki = Math.abs(tot - t.ref) <= t.ref * 0.005;
+    return esc9(t.nom.toLowerCase()) + ' <b class="' + (oki ? 'okC' : 'koC') + '">' + (oki ? '✓' : '⚠') + '</b> Σ ' + uF(k, tot) + uN(k) + ' = ' + uF(k, t.ref) + uN(k);
+  }).join(' · ');
+  const pct = k => (c[k].src / (c[k].ref || 1) * 100).toFixed(1).replace('.', ',');
+  const l2 = '<b class="' + (c.hp.ok && c.log.src / c.log.ref > .9 ? 'okC' : 'koC') + '">⚠ Couverture :</b> les conseillers du Planning portent '
+    + '<b>' + pct('rec') + ' %</b> des reçus · <b>' + pct('tra') + ' %</b> des traités · <b>' + pct('htr') + ' %</b> des heures de traitement · <b>' + pct('log') + ' %</b> des heures de log · <b>100 %</b> des HP.';
+  const l3 = 'Le reste ne peut pas être rattaché à une ligne du Planning : agents FIM (hors périmètre : ' + fmt(cv.agentFIM[0]) + ' reçus · '
+    + fmt(cv.agentFIM[1]) + ' traités · ' + fmt1(cv.agentFIM[2]) + ' h), appels sans agent identifié (' + fmt(cv.vide[0]) + ' reçus), réalisé hors jours planifiés ('
+    + fmt(cv.prodHorsPlanningJour[0]) + ' reçus · ' + fmt1(cv.prodHorsPlanningJour[2]) + ' h) et heures de log hors jours planifiés (' + fmt1(cv.logHorsJour[0]) + ' h).';
+  return '<div class="cohL">' + l1 + '</div><div class="cohL">' + l2 + '</div><div class="cohL">' + l3 + '</div>';
+}
+
+function renderConAgent() {              // sous-onglet « Par agent » : 1 ligne par conseiller
+  const el = $('tConA'); if (!el) return;
+  const C = D.con;
+  if (!C || !C.agents || !C.agents.length) { el.innerHTML = '<tr><th style="text-align:left">Aucune donnée par conseiller — utilisez « ↻ Actualiser »</th></tr>'; return; }
+  const q = norm((($('conQ') || {}).value) || '');
+  const list = C.agents.filter(x => !q || norm(x.ag + ' ' + x.nom + ' ' + x.wd + ' ' + x.eq).includes(q));
+  let h = '<thead><tr><th class="cfirst">Conseiller (Log Vonage)</th><th>NOMS ET PRÉNOMS</th><th>Workday</th><th>Mlle Paie</th>'
+        + '<th>Compétences (lot)</th><th>Jours</th><th>HP</th>'
+        + '<th class="addc">Reçus</th><th class="addc">Traités</th><th class="addc" title="Communication + ACW">H. traitement</th>'
+        + '<th class="addc">H. de log</th><th class="addc" title="CPH = contacts traités / heure de log">CPH</th></tr></thead><tbody>';
+  list.forEach(x => {
+    h += '<tr><td class="cfirst">' + esc9(x.ag) + '</td>'
+       + '<td class="lft">' + esc9(x.nom || '—') + '</td><td>' + esc9(x.wd) + '</td><td>' + esc9(x.paie) + '</td>'
+       + '<td>' + esc9(x.lot) + '</td><td>' + x.nJ + '</td><td>' + fmt1(x.tot.hp) + '</td>'
+       + '<td class="addc">' + fmt(x.tot.rec) + '</td><td class="addc">' + fmt(x.tot.tra) + '</td>'
+       + '<td class="addc">' + fmt1(x.tot.htr) + '</td><td class="addc">' + fmt1(x.tot.log) + '</td>'
+       + '<td class="addc"><b>' + f2(x.tot.cph) + '</b></td></tr>';
   });
-  const hpJ = {}; dates.forEach(d => { hpJ[d] = 0; for (const a in ags) if (ags[a].c[d]) hpJ[d] += ags[a].c[d].hp || 0; });
-  const recJ = {}, trJ = {}, htrJ = {}, hlogJ = {};
-  dates.forEach(d => {
-    const i = ((D.real && D.real.dates) || []).indexOf(d);
-    recJ[d] = i >= 0 ? Object.values(D.real.f).reduce((s, v) => s + (v.r[i] || 0), 0) : 0;
-    trJ[d]  = i >= 0 ? Object.values(D.real.f).reduce((s, v) => s + (v.t[i] || 0), 0) : 0;
-    const di = ((D.dmt && D.dmt.dates) || []).indexOf(d);
-    htrJ[d] = di >= 0 ? Object.values(D.dmt.f).reduce((s, v) => s + ((v.com[di] || 0) + (v.acw[di] || 0)), 0) / 3600 : 0;
-    const li = ((D.logR && D.logR.dates) || []).indexOf(d);
-    hlogJ[d] = li >= 0 ? (((D.logR.h || {}).tot) || [])[li] || 0 : 0;
+  const T = list.reduce((o, x) => { for (const k of ['hp', 'rec', 'tra', 'htr', 'log']) o[k] += x.tot[k]; o.nJ += x.nJ; return o; },
+    { hp: 0, rec: 0, tra: 0, htr: 0, log: 0, nJ: 0 });
+  const cphT = T.log ? T.tra / T.log : 0;
+  h += '<tr class="cTot"><td class="cfirst">Totaux · ' + list.length + ' conseiller(s)</td><td colspan="4"></td><td>' + T.nJ + '</td><td>' + fmt1(T.hp) + '</td>'
+     + '<td class="addc">' + fmt(T.rec) + '</td><td class="addc">' + fmt(T.tra) + '</td><td class="addc">' + fmt1(T.htr) + '</td>'
+     + '<td class="addc">' + fmt1(T.log) + '</td><td class="addc"><b>' + f2(cphT) + '</b></td></tr></tbody>';
+  el.innerHTML = h;
+}
+
+function renderConJour() {               // sous-onglet « Par jour » : 1 ligne par conseiller × jour
+  const el = $('tConJ'); if (!el) return;
+  const C = D.con;
+  if (!C || !C.agents) { el.innerHTML = '<tr><th style="text-align:left">Aucune donnée par conseiller — utilisez « ↻ Actualiser »</th></tr>'; return; }
+  const q = norm((($('conQ') || {}).value) || '');
+  const dj = (($('conDJ') || {}).value) || '';
+  let h = '<thead><tr><th class="cfirst">Sem</th><th>Date</th><th>Jour</th><th>Conseiller (Log Vonage)</th><th>NOMS ET PRÉNOMS</th>'
+        + '<th>Workday</th><th>Mlle Paie</th><th>Shift In</th><th>Shift Out</th><th>HP</th>'
+        + '<th class="addc">Reçus</th><th class="addc">Traités</th><th class="addc">H. traitement</th><th class="addc">H. de log</th>'
+        + '<th class="addc" title="CPH = contacts traités / heure de log">CPH</th></tr></thead><tbody>';
+  let T = { hp: 0, rec: 0, tra: 0, htr: 0, log: 0 }, n = 0;
+  C.agents.forEach(x => {
+    if (q && !norm(x.ag + ' ' + x.nom + ' ' + x.wd + ' ' + x.eq).includes(q)) return;
+    x.jours.forEach(j => {
+      if (dj && j.d !== dj) return;
+      const cph = j.log ? j.tra / j.log : 0;
+      h += '<tr><td>' + esc9(j.sem) + '</td><td>' + dShort(j.d) + '</td><td>' + esc9(j.jour) + '</td>'
+         + '<td>' + esc9(x.ag) + '</td><td class="lft">' + esc9(j.nom || '—') + '</td><td>' + esc9(j.wd) + '</td><td>' + esc9(j.paie) + '</td>'
+         + '<td>' + esc9(j.si) + '</td><td>' + esc9(j.so) + '</td><td>' + fmt1(j.hp) + '</td>'
+         + '<td class="addc">' + fmt(j.rec) + '</td><td class="addc">' + fmt(j.tra) + '</td><td class="addc">' + fmt1(j.htr) + '</td>'
+         + '<td class="addc">' + fmt1(j.log) + '</td><td class="addc"><b>' + f2(cph) + '</b></td></tr>';
+      for (const k of ['hp', 'rec', 'tra', 'htr', 'log']) T[k] += j[k];
+      n++;
+    });
   });
-  const list = Object.keys(ags).sort((x, y) => x.localeCompare(y, 'fr')).map(a => {
-    const A = ags[a]; let rec = 0, tr = 0, htr = 0, hlog = 0;
-    dates.forEach(d => { const c = A.c[d]; if (!c) return; const P = hpJ[d]; if (!P) return;
-      const k = (c.hp || 0) / P; rec += recJ[d] * k; tr += trJ[d] * k; htr += htrJ[d] * k; hlog += hlogJ[d] * k; });
-    return { ag: a, wd: A.wd, eq: A.eq, hpT: A.hpT, rec, tr, htr, hlog, cph: hlog ? tr / hlog : 0, c: A.c };
-  });
-  const T = list.reduce((o, x) => { o.hpT += x.hpT; o.rec += x.rec; o.tr += x.tr; o.htr += x.htr; o.hlog += x.hlog; return o; },
-    { hpT: 0, rec: 0, tr: 0, htr: 0, hlog: 0 });
-  T.cph = T.hlog ? T.tr / T.hlog : 0;
-  return { dates, list, tot: T };
+  const cphT = T.log ? T.tra / T.log : 0;
+  h += '<tr class="cTot"><td class="cfirst" colspan="9">Totaux · ' + n + ' ligne(s)</td><td>' + fmt1(T.hp) + '</td>'
+     + '<td class="addc">' + fmt(T.rec) + '</td><td class="addc">' + fmt(T.tra) + '</td><td class="addc">' + fmt1(T.htr) + '</td>'
+     + '<td class="addc">' + fmt1(T.log) + '</td><td class="addc"><b>' + f2(cphT) + '</b></td></tr></tbody>';
+  el.innerHTML = h;
 }
 
 function renderCon() {
-  CONM = conData(); renderConTable();
-  const n = $('conNote');
-  if (n) n.innerHTML = 'Méthode — le fichier source mesure le réalisé (contacts reçus, traités, temps de communication + ACW, '
-    + 'heures de log) <b>par flux et par jour</b>, pas par conseiller : ces valeurs sont donc ventilées par conseiller '
-    + 'au prorata des heures planifiées de chaque journée. <b>CPH (contacts per hour) = contacts traités / heure de log.</b> '
-    + 'Périmètre : canal téléphonique du fichier réalisé (le mail est traité dans les onglets dédiés). '
-    + 'Cellule planning : créneau de présence planifié (survol : pauses, lot, indicateurs du fichier).';
-}
-
-function renderConTable() {
-  const el = $('tCon'); if (!el) return;
-  if (!CONM || !CONM.list.length) {
-    el.innerHTML = '<tr><th style="text-align:left">Aucune donnée de planification — importez le classeur ou utilisez « ↻ Actualiser »</th></tr>';
-    return;
-  }
-  const q = norm((($('conQ') || {}).value) || '');
-  const mode = (($('conCell') || {}).value) || 'cre';
-  const list = CONM.list.filter(x => !q || norm(x.ag + ' ' + x.wd + ' ' + x.eq).includes(q));
-  let h = '<thead><tr><th class="cfirst" rowspan="2">Conseiller</th>';
-  CONM.dates.forEach(d => { h += '<th>' + dShort9(d) + '</th>'; });
-  h += '<th rowspan="2" title="Somme des heures planifiées de la période">HP</th>'
-     + '<th rowspan="2" class="addc">Reçus</th><th rowspan="2" class="addc">Traités</th>'
-     + '<th rowspan="2" class="addc" title="Communication + ACW, ventilé">H. traitement</th>'
-     + '<th rowspan="2" class="addc" title="Heures de log, ventilées">H. de log</th>'
-     + '<th rowspan="2" class="addc" title="CPH = contacts traités / heure de log">CPH</th></tr></thead><tbody>';
-  list.forEach(x => {
-    h += '<tr><td class="cfirst">' + esc9(String(x.ag).split(/\s+/)[0])
-       + '<span class="sub2">' + esc9(x.eq) + (x.wd ? ' · ' + esc9(x.wd) : '') + '</span></td>';
-    CONM.dates.forEach(d => {
-      const c = x.c[d];
-      if (!c) { h += '<td class="cre empty">—</td>'; return; }
-      const t = JJ[new Date(d + 'T00:00:00').getDay()] + ' ' + dShort9(d).slice(4) + ' : ' + fmt1(c.hp)
-        + ' h planifiées' + (c.r1 || c.r2 ? ' · pauses ' + mHM(c.r1) + ' / ' + mHM(c.r2) : '')
-        + (c.lot ? ' · ' + esc9(c.lot) : '') + (c.al ? ' · al=1' : '');
-      h += '<td class="cre' + (c.al ? ' al1' : '') + '" title="' + t + '">'
-         + (mode === 'hp' ? fmt1(c.hp) : mHM(c.sin) + '–' + mHM(c.sout)) + '</td>';
-    });
-    h += '<td>' + fmt1(x.hpT) + '</td><td class="addc">' + fmt(x.rec) + '</td><td class="addc">' + fmt(x.tr)
-       + '</td><td class="addc">' + fmt1(x.htr) + '</td><td class="addc">' + fmt1(x.hlog)
-       + '</td><td class="addc"><b>' + fmt1(x.cph) + '</b></td></tr>';
-  });
-  const T = CONM.tot;
-  h += '<tr class="cTot"><td class="cfirst">Totaux · ' + list.length + ' conseiller(s)</td>';
-  CONM.dates.forEach(d => { let s2 = 0; list.forEach(x => { if (x.c[d]) s2 += x.c[d].hp || 0; }); h += '<td>' + fmt1(s2) + '</td>'; });
-  h += '<td>' + fmt1(T.hpT) + '</td><td class="addc">' + fmt(T.rec) + '</td><td class="addc">' + fmt(T.tr)
-     + '</td><td class="addc">' + fmt1(T.htr) + '</td><td class="addc">' + fmt1(T.hlog)
-     + '</td><td class="addc"><b>' + fmt1(T.cph) + '</b></td></tr>';
-  h += '</tbody>';
-  el.innerHTML = h;
+  renderConAgent(); renderConJour();
+  const c = $('conCoh'); if (c) c.innerHTML = cohHtml();
+  const s9 = $('conDJ');
+  if (s9 && s9.options.length <= 1 && D.con)
+    s9.innerHTML = '<option value="">Tous les jours</option>'
+      + (D.con.dates || []).map(d => '<option value="' + d + '">' + dShort(d) + '</option>').join('');
+  const note = 'Réalisé par conseiller extrait des feuilles EXT_Entrant (colonnes Traité / Reçus, durées de communication + ACW) et '
+    + 'EXT_Agent (états productifs = heures de log) du classeur DASHBOARD CAPA — mêmes définitions que les onglets Analyse réalisé / DMT / Planification. '
+    + 'Identité : feuille « Planning ». CPH (contacts per hour) = contacts traités / heure de log. '
+    + 'Ces colonnes pourront être recopiées telles quelles dans la feuille « Planning » du classeur.';
+  const nA = $('conNoteA'), nJ = $('conNoteJ');
+  if (nA) nA.textContent = note;
+  if (nJ) nJ.textContent = note;
 }
 RENDERS.p9 = renderCon;
 
@@ -1342,8 +1368,9 @@ function bindUI() {
   document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.p)));
   $('bImp').addEventListener('click', () => $('imp').showModal());
   $('bImpClose').addEventListener('click', () => $('imp').close());
-  $('conQ').addEventListener('input', () => renderConTable());
-  $('conCell').addEventListener('change', () => renderConTable());
+  $('conQ').addEventListener('input', () => { renderConAgent(); renderConJour(); });
+  $('conDJ').addEventListener('change', () => renderConJour());
+  document.querySelectorAll('#p9subs button[data-v]').forEach(b => b.addEventListener('click', () => p9sub(b.dataset.v)));
   $('bExp').addEventListener('click', dlJSON);
   $('bExp2').addEventListener('click', dlJSON);
   /* boutons « Démo » et « Réinitialiser » retirés : aucune action de l'interface ne peut

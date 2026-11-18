@@ -3,6 +3,24 @@
 Application 100 % statique (HTML/CSS/JS vanilla + Chart.js 4.4.1 + SheetJS via CDN), sans build.
 Déploiement : Cloudflare Workers (déploiement manuel par upload d'assets).
 
+## Onglet « Analyse par conseiller » — v12 (dernier onglet, 2 sous-onglets)
+
+Placé en **dernière position**. Deux sous-onglets au format de la feuille « Planning » du
+classeur DASHBOARD CAPA AUCHAN :
+- **Par agent** : 1 ligne par conseiller — identité Planning (Log Vonage, NOMS ET PRÉNOMS,
+  Workday, Mlle Paie, Compétences/lot) + jours planifiés, HP, **contacts reçus, contacts
+  traités, heures de traitement (communication + ACW), heures de log, CPH = traités / heure de log**
+- **Par jour** : 1 ligne par conseiller et par jour planifié (Sem, Date, Jour, shifts, HP)
+  avec les mêmes colonnes réalisées et un filtre par jour
+Données extraites des feuilles **EXT_Entrant** (colonnes Traité / Reçus, durées) et
+**EXT_Agent** (états productifs = heures de log), mêmes définitions que les onglets
+Analyse réalisé / DMT / Planification — prêtes à être recopiées dans la feuille « Planning ».
+**Bandeau de cohérence** : réconciliation Σ buckets = totaux de l'outil (reçus 16 615 ✓,
+traités 14 059 ✓, traitement 940 h ✓, log 1 914,2 h ✓, HP 2 848,5 h ✓) et alerte de
+couverture : les conseillers du Planning portent 54,6 % des reçus, 64,6 % des traités,
+60,7 % des heures de traitement, 92,6 % des heures de log — le reste (agents FIM, appels
+sans agent identifié, réalisé hors jours planifiés) n'est pas rattachable au Planning.
+
 ## Onglet « Analyse par conseiller » (nouveau)
 
 5ᵉ onglet de la barre : tableau au **format de la feuille « Planning »** du classeur
