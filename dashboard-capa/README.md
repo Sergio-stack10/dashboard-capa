@@ -227,19 +227,28 @@ Les données du site sont celles des JSON de `data/`. Pour les rafraîchir :
 
 L'outil est **entièrement contenu dans index.html** : CSS, Chart.js, XLSX, application et
 **toutes les données préchargées** (roadmap, prévision, planification, réalisé, DMT, mail,
-réalisé par conseiller). Aucun fichier annexe, aucune dépendance réseau : **aucune requête
-n'est envoyée** (le chargement de repli par fetch a été supprimé en v14).
+créneaux, suivi par conseiller). Aucun fichier annexe, aucune dépendance réseau : **aucune
+requête n'est envoyée**.
 - Déployez index.html seul (intranet, SharePoint, Netlify, clé USB…) : il ne peut plus y
   avoir de « remise à 0 » liée à des fichiers manquants.
 - **Vérification après déploiement** : en haut à droite, la pastille **« Socle 9/9 ✓ »**
-  doit apparaître. Si elle affiche **« Socle 0/9 ⚠ »** (en rouge), le fichier déployé est
-  tronqué ou ce n'est pas la bonne version : re-déployez index.html ENTIER.
+  doit apparaître et le badge doit afficher **« v15 · 2026-11-19 »**. Pastille **« 0/9 ⚠ »**
+  (rouge) = fichier tronqué ou mauvaise version : re-déployez index.html ENTIER.
+- **Empreinte du bon fichier** : SHA-256 indiqué dans le message de livraison du 19/11.
 - Au démarrage, l'outil compare l'état sauvegardé du navigateur (IndexedDB) au socle intégré
-  et **garde la source la plus complète** : un état vide ou corrompu ne peut plus masquer
-  les données ; les saisies de l'utilisateur restent prioritaires.
-- Les boutons « Démo » et « Réinitialiser » ont été retirés : aucune action de l'interface
-  ne peut effacer les données.
-- Une sauvegarde vide est refusée (garde-fou anti-écrasement du socle).
+  et **garde la source la plus complète** ; l'import du classeur DASHBOARD reconstruit aussi
+  le suivi par conseiller et les créneaux (dates du fichier importé).
+
+## Nouveautés v15
+
+- **Analyse réalisé** : sous-onglets **Semaine / Journalière / Créneaux** (créneaux de
+  30 min, convention « fin de créneau » comme la prévision, source EXT_Entrant).
+- **Analyse par conseiller** : les colonnes du tableau « Suivi » du classeur (HP, Absences,
+  Heures travaillées, non loguées, loguées rectifiées, Pause, Monitoring, Panne client,
+  Heures de prod, Dispo, Heure de traitement + par canal, Traités APPEL, Traités Mail,
+  Total traités, CPH, Contact/jour) — vues « Par agent » et « Par jour ».
+- **Import corrigé** : l'import du classeur met désormais à jour le suivi par conseiller et
+  les créneaux avec les dates du fichier importé (fin du bug « arrêté au 10/11 »).
 
 ## Déploiement Cloudflare (manuel)
 
