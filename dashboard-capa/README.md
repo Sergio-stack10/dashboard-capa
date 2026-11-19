@@ -232,12 +232,31 @@ requête n'est envoyée**.
 - Déployez index.html seul (intranet, SharePoint, Netlify, clé USB…) : il ne peut plus y
   avoir de « remise à 0 » liée à des fichiers manquants.
 - **Vérification après déploiement** : en haut à droite, la pastille **« Socle 9/9 ✓ »**
-  doit apparaître et le badge doit afficher **« v15 · 2026-11-19 »**. Pastille **« 0/9 ⚠ »**
+  doit apparaître et le badge doit afficher **« v16 · 2026-11-19 »**. Pastille **« 0/9 ⚠ »**
   (rouge) = fichier tronqué ou mauvaise version : re-déployez index.html ENTIER.
 - **Empreinte du bon fichier** : SHA-256 indiqué dans le message de livraison du 19/11.
 - Au démarrage, l'outil compare l'état sauvegardé du navigateur (IndexedDB) au socle intégré
   et **garde la source la plus complète** ; l'import du classeur DASHBOARD reconstruit aussi
   le suivi par conseiller et les créneaux (dates du fichier importé).
+
+## Nouveautés v16
+
+- **Analyse réalisé → « Suivi flux »** (vue par défaut) : le tableau de suivi du classeur —
+  heures planifiées, absences, travaillées, non loguées, log, pause légale, autres retraits,
+  productives, dispo, heures de traitement par canal (Entrant/Sortant/Mail/Chat/Panier/Total),
+  taux (absentéisme, Pause, autres retraits, dispo, Tx-Occ), prévision et contacts traités
+  par canal — plus un **récapitulatif hebdomadaire par flux** (Hyper / AFR / Drive / SAV…).
+- **ISO Roadmap** : prévision et capa Roadmap identiques quel que soit l'onglet ou la vue
+  (Semaine / Journalière / Créneaux / Suivi flux) — même mécanique de répartition par
+  créneaux que l'onglet Roadmap, repli sur la « prévision finale RM », capa en heures de
+  log du modèle RM affichée à côté du HP Planning.
+- **Mise en forme conditionnelle** : gradients par colonne sur les tableaux d'Analyse par
+  conseiller (heures et traités), badges colorés pour les taux, en-têtes collants, zebra,
+  sous-onglets en dégradé.
+- **Sauvegarde Cloudflare** : carte « ☁ Sauvegarde Cloudflare » (Analyse par conseiller) —
+  boutons Sauver / Charger du cloud + fichiers et étapes dans le dossier `cloudflare/`.
+- Vue Créneaux : « Top créneaux » retiré, remplacé par la comparaison réalisé vs
+  prévision / capa Roadmap (avec sélecteur de fuseau Paris/Mada).
 
 ## Nouveautés v15
 
