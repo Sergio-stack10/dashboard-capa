@@ -1,0 +1,258 @@
+# Dashboard capacitaire – Roadmap Auchan
+
+Application 100 % statique (HTML/CSS/JS vanilla + Chart.js 4.4.1 + SheetJS via CDN), sans build.
+Déploiement : Cloudflare Workers (déploiement manuel par upload d'assets).
+
+## Onglet « Analyse par conseiller » — v12 (dernier onglet, 2 sous-onglets)
+
+Placé en **dernière position**. Deux sous-onglets au format de la feuille « Planning » du
+classeur DASHBOARD CAPA AUCHAN :
+- **Par agent** : 1 ligne par conseiller — identité Planning (Log Vonage, NOMS ET PRÉNOMS,
+  Workday, Mlle Paie, Compétences/lot) + jours planifiés, HP, **contacts reçus, contacts
+  traités, heures de traitement (communication + ACW), heures de log, CPH = traités / heure de log**
+- **Par jour** : 1 ligne par conseiller et par jour planifié (Sem, Date, Jour, shifts, HP)
+  avec les mêmes colonnes réalisées et un filtre par jour
+Données extraites des feuilles **EXT_Entrant** (colonnes Traité / Reçus, durées) et
+**EXT_Agent** (états productifs = heures de log), mêmes définitions que les onglets
+Analyse réalisé / DMT / Planification — prêtes à être recopiées dans la feuille « Planning ».
+**Bandeau de cohérence** : réconciliation Σ buckets = totaux de l'outil (reçus 16 615 ✓,
+traités 14 059 ✓, traitement 940 h ✓, log 1 914,2 h ✓, HP 2 848,5 h ✓) et alerte de
+couverture : les conseillers du Planning portent 54,6 % des reçus, 64,6 % des traités,
+60,7 % des heures de traitement, 92,6 % des heures de log — le reste (agents FIM, appels
+sans agent identifié, réalisé hors jours planifiés) n'est pas rattachable au Planning.
+
+## Onglet « Analyse par conseiller » (nouveau)
+
+5ᵉ onglet de la barre : tableau au **format de la feuille « Planning »** du classeur
+DASHBOARD CAPA AUCHAN (lignes = conseillers avec équipe et matricule, colonnes = jours,
+cellule = créneau planifié ; survol : heures, pauses, lot). Colonnes ajoutées :
+**contacts reçus, contacts traités, heures de traitement (communication + ACW),
+heures de log et CPH = traités / heure de log**. Le fichier source mesure le réalisé
+par flux et par jour : ces valeurs sont ventilées par conseiller au prorata des heures
+planifiées de chaque journée (méthode rappelée sous le tableau). Filtre de recherche
+(nom, équipe, matricule), cellules commutables créneau / heures planifiées, totaux en
+pied de tableau (contrôle : Σ reçus = 16 615, Σ traités = 14 059, CPH global 7,34).
+
+## Boutons supprimés, badge de version (nouveau)
+
+Les boutons **« Réinitialiser »** et **« Démo »** (interface et options d'import) sont
+**retirés** : aucune action de l'interface ne peut effacer les données. « Démo » écrasait
+et sauvegardait des données fictives ; « Réinitialiser » vidait la sauvegarde locale — sur
+une ancienne version sans données intégrées, cela donnait un outil vide. La seule « remise
+à niveau » est le rechargement du **socle injecté** : au démarrage (données intégrées) ou
+via les boutons **« ↻ Actualiser »** des onglets, qui rechargent les données préchargées
+sans toucher aux données importées. L'en-tête affiche un **badge de version** (ex.
+« v10 · 2026-11-17 ») : si vous ne le voyez pas, vous êtes sur un ancien fichier.
+
+## Ouverture locale (nouveau)
+
+**Double-cliquez sur `index.html`** (extrayez le zip d'abord) : les données préchargées
+(RM, prévision Webhelp avec correctifs de la feuille « Poids », planification) sont
+**intégrées au fichier** — aucun serveur n'est nécessaire. Un serveur statique reste
+utile pour l'actualisation des fichiers `data/*.json` (bouton « ↻ Actualiser »), sinon
+les données intégrées font foi. Attention : n'utilisez que le zip le plus récent
+(les anciens zips contiennent une ancienne interface et d'anciennes données).
+
+## Contenu du dépôt
+
+| Fichier | Rôle |
+|---|---|
+| `index.html` | Interface : 4 onglets (dont 3 sous-onglets Roadmap et 2 sous-onglets Planification) + barre de filtres globale + dialog d'import (3 fichiers) |
+| `js/app.js` | Logique applicative (données, imports, répartition Skills, graphiques, filtres globaux) |
+| `data/roadmap.json` | **Onglet Roadmap** : modèle RM complet — 21 sections × 12 activités × 113 semaines |
+| `data/prevision.json` | **Prévision Webhelp** : prévus mensuels (12 mois × 6 flux) + poids journaliers + créneaux 30 min (profils Lundi-samedi / Dimanche) — sert à répartir le capacitaire par jour et par créneau |
+| `data/dashcapa.json` | **Données DASHBOARD CAPA AUCHAN** : feuille Planning (heures planifiées, allaitement, 10 jours × 80 agents + lignes brutes), feuille Skills (60 compétences), EXT_Agent (heures de log réalisées), EXT_Entrant (réalisé voix + DMT), EXT_Email (réalisé mail) |
+| `data/data.json` | Métadonnées (dates de mise à jour et noms de fichiers) |
+| `favicon.svg` | Icône de l'outil (onglet navigateur) |
+| `_headers` | Cloudflare : pas de cache (mises à jour toujours visibles) |
+| `scripts/` | Scripts de génération des JSON (roadmap, prévision, dashcapa) |
+
+## Sources de données — 3 fichiers uniquement
+
+| Fichier importé | Alimente |
+|---|---|
+| **Roadmap — modèle RM** (.xlsm, onglet AUCHAN) | Onglet Roadmap (les 3 vues) + capa roadmap de l'Analyse capa |
+| **Prévision Webhelp** (.xlsx, onglets `2026` + `Poids`) | Répartition journalière et par créneau du capacitaire + prévision finale |
+| **Données DASHBOARD CAPA AUCHAN** (.xlsx, feuilles `Planning`, `Skills`, `EXT_Agent`, `EXT_Entrant`, `EXT_Email`) | Onglet Planification + capa planif (Analyse capa) + réalisé de l'onglet Analyse réalisé |
+
+Les anciens imports (ETP, Planning heures, Réalisé DRM, DMT Vonage, Export Mail, Prévision Mail,
+Planning agents) ont été retirés : le fichier « Données DASHBOARD CAPA » est désormais la source
+unique de la planification et de la réalisation.
+
+## Les 4 onglets
+
+**Filtres globaux (au-dessus de chaque onglet)** : Granularité (Jour / Semaine / Mois) ·
+**Flux** (multi : Front office / Back office / Autres) · **Channel** (multi : PHONE / MAIL / CHAT) ·
+**Activités** (multi) · **Période** · **Intervalle de période**. Chaque groupe a ses boutons
+**Tout sélectionner / Tout désélectionner** et un code couleur propre (Flux bleu · Channel vert ·
+Activités violet). Cascade : Flux → Channels possibles → Activités possibles. Les filtres sont
+grisés quand ils ne s'appliquent pas (ex. : les vues Roadmap/Planification ont leurs propres
+filtres de période).
+
+1. **Roadmap** — 3 sous-onglets :
+   - **Vue annuelle — par semaine** (filtres Année + Mois) : le modèle RM hebdomadaire —
+     capacitaires (heures de log / prod, actes), prévisions, ETP, effectif, SLA/QE vs cible,
+     DMT, taux d'occupation, absentéisme, congés + tableau hebdomadaire.
+   - **Vue journalière** (filtres Année, Mois, Semaine + Personnalisé du/au) : capa hebdo du
+     modèle RM répartie par jour au prorata des **poids de la Prévision Webhelp** — mêmes
+     indicateurs par jour (QE du jour = capa actes ÷ prévision finale).
+   - **Vue par créneaux** (mêmes filtres + Moyenne période / Jour précis) : capa journalière
+     répartie par créneaux 30 min selon les **poids créneaux** de la prévision (profil
+     « Lundi au samedi » / « Dimanche ») — actes, heures, ETP à la pointe, QE.
+
+2. **Planification** — 2 sous-onglets. La capa en heures de contrat (effectif planifié hors FIM
+   × 8 h/jour, 7 h si allaitement — colonne « Allaitement » du `Planning`) est répartie par
+   activité × canal selon la feuille `Skills` :
+   - **HYPER/DRIVE** → 50/50 sur les activités Hyper et Drive × 50/50 sur les canaux MAIL et PHONE ;
+   - **ALL** (LOT UNIQUE) → toutes les activités et tous les canaux (répartition uniforme) ;
+   - **SAV** → mono-compétence sur le PHONE · **CHAT** (LOT 4) → mono-compétence sur le CHAT.
+   - **Vue journalière** : capa contrat par activité par jour + effectif planifié (prod / FIM /
+     allaitement) + heures de log réalisées (EXT_Agent : Busy, Wrap Up, Hold, Chat, Panier — hors agents FIM).
+   - **Vue par créneaux** : personnes et heures de contrat par créneau 30 min + matrice créneau × activité.
+
+3. **Analyse capa** — **capa roadmap vs capa planif** (l'ancien « réalisé » a été retiré) :
+   - capa roadmap = capa hebdo du modèle RM répartie par jour (poids prévision) ;
+   - capa planif = **capa en heures de contrat** hors FIM × (1 − absentéisme RM) → actes = capa
+     heures × **productivité du modèle RM** (par activité **et par canal** : `Mail Hyper` / `Mail AFR` /
+     `Mail Drive` pour le canal MAIL, `Direct (LAD)` pour Direct, etc.) ;
+   - **seuls les jours couverts par la planification sont analysés** (les jours sans planif sont
+     exclus pour ne pas fausser les écarts).
+
+## Ventilation de la prévision, fuseau et agrégat horaire (nouveau)
+
+- **Ventilation « Calcul prévision »** — la prévision affichée dans les vues journalière et par
+  créneaux est désormais la **prévision Webhelp** ventilée exactement comme le fichier de calcul :
+  **prévu du MOIS × poids journalier du jour** (Σ poids = 1 par mois × flux) puis **× poids
+  intraday du créneau** (Σ = 1). Repli : prévision finale RM quand un mois/flux n'a pas de
+  prévision Webhelp (signalé dans le KPI). Le QE = capa ÷ prévision Webhelp (repli prévision RM).
+- **Codes créneaux = fin de créneau** — comme dans le fichier de calcul (`P(O) = M(O) + M(O−30)`) :
+  le code 800 couvre **[07:30 → 08:00)** Paris ; l'**heure pleine** « 07:00 » = codes 730 + 800.
+  L'affichage montre toujours l'intervalle complet (ex. « 09:00 → 10:00 »).
+- **Heure Paris → Mada** — la prévision est en heure Paris, le planning en heure Madagascar :
+  un sélecteur **« Heure Paris → Mada »** (vision Mada **+2 h** par défaut, +1 h l'été, ou
+  Paris 0 h) décale les créneaux de la vue par créneaux (prévision **et** capa roadmap) pour
+  les aligner sur le planning. Choix persisté (localStorage).
+- **Agrégat** — sélecteur **« Créneaux 30 min » / « Heures pleines »** : le mode heures pleines
+  somme 2 créneaux consécutifs (13 lignes + le reste de la dernière demi-heure, comme le
+  tableau O-P du fichier). Choix persisté.
+- **Notes retirées** — les blocs de notes / notes de formules sous les tableaux ont été
+  supprimés de toutes les pages.
+
+## Ventilation conforme à la feuille « Poids » (nouveau)
+
+La ventilation de la **prévision** et de la **capa roadmap** par jour respecte désormais
+exactement la feuille « Poids » du classeur de prévision :
+
+- **Poids journaliers par date × activité** — Appel (Hyper, C2E, Auchan.fr, Drive, SAV) et
+  Mail (Hyper, Auchan.fr, Drive) : chaque jour du mois a son propre poids (Σ = 1 par mois ×
+  activité), utilisé pour spliter le prévu mensuel **et** pour répartir la capa hebdo du
+  modèle capacitaire par jour.
+- **Séries « Correctif »** — les poids révisés du fichier (ex. « Correctif | Hyper | le 04/09 » :
+  poids d'appels Hyper de septembre recalés sur le réalisé, la série initiale étant décalée
+  d'un jour) **remplacent** la série principale, par date (30 poids corrigés sur les données
+  préchargées).
+- **Poids Chat « Lundi au samedi »** — la capa roadmap Chat est répartie selon le profil par
+  jour de semaine de la feuille Poids (Σ = 1 du lundi au samedi, **aucune capa le dimanche**)
+  au lieu d'une répartition uniforme.
+- **Poids « 0 explicite » respectés** — un poids lu à 0 dans le fichier (ex. SAV appels le
+  dimanche) est appliqué tel quel : ni capa ni prévision ce jour-là. Le repli « profil hyper »
+  ne s'applique qu'aux activités **sans colonne** dans le fichier (ex. Direct), et de façon
+  identique pour la prévision journalière et la capa roadmap (replis alignés).
+- **Invariants vérifiés** — Σ capa journalière = Σ capa hebdo du modèle pour les 113 semaines
+  × 7 activités (791 cas, 0 écart) ; Σ poids par mois = 1 pour chaque activité.
+- `data/prevision.json` préchargé régénéré avec le code d'import réel (correctifs appliqués).
+
+## Planification : capa en heures de log, congés, exclusions (nouveau)
+
+- **Capa en heures de log** (ex-« capa contrat ») — l'écart entre la Σ répartition par activités
+  et la capa est corrigé : le KPI et la colonne **« Capa en h de log »** comptent désormais les
+  heures de contrat **réellement répartissables** au prorata des compétences retenues par les
+  filtres (activités / canaux). Σ réparti = capa sur chaque jour (vérifié : 2 847 h = 2 847 h sur
+  la période préchargée, écart 0). Le KPI précise les heures hors périmètre (filtres) et les
+  heures non répartissables (présence ou compétence manquante), si elles existent.
+- **Congés** — la colonne **« Congé »** du planning (agents hors planification) est désormais
+  lue : KPI **« Congés »** (heures + agents × jours), colonne « Congé (h) » du tableau
+  journalier et ligne « Congés (h) » du graphique. Données préchargées : 200 h sur 9 jours.
+- **Borne/LSA exclu** — l'activité Borne/LSA est retirée de tous les calculs et visuels :
+  import du modèle (sections non lues), réalisé voix (queues ignorées), heures de log réalisées,
+  filtres et listes d'activités, données de démo.
+- **Noms de fichiers jamais affichés** — l'outil ne montre plus aucun nom de fichier : les
+  sources sont désignées par des termes génériques (« modèle capacitaire », « planification »,
+  « prévision Webhelp », « classeur de planification »).
+- **Superflu retiré** — KPIs redondants avec les graphiques supprimés (effectif productif
+  dernière semaine, absentéisme et taux d'occupation en moyenne, activité dominante) et note
+  d'aide de l'onglet Import retirée.
+
+## Persistance, productivité et actualisation (nouveau)
+
+- **Sauvegarde automatique** — tout import (et la démo) est enregistré immédiatement dans le
+  navigateur (**IndexedDB**, repli localStorage). Les données **restent après actualisation ou
+  fermeture de la page**, même pour de gros fichiers : localStorage seul était limité à ~5 Mo et
+  la sauvegarde échouait en silence (cause des pertes constatées). L'entête affiche l'état
+  (« Sauvegarde locale active » / « Sauvegardé à HH:MM » / « ⚠ Sauvegarde impossible »).
+  « Réinitialiser » efface IndexedDB + localStorage et recharge les données préchargées.
+- **Capa en heures de log (Planification)** — la capa en heures n'est plus la présence
+  du fichier : elle vaut **effectif planifié hors FIM × heure contrat** (8 h/jour · 40 h/semaine,
+  **7 h si allaitement** — colonne « Allaitement » du Planning). Ces heures de contrat sont
+  ramenées sur la présence [Shift In, Shift Out) − pause repas au prorata des créneaux, puis
+  réparties par activité × canal selon la feuille Skills (Σ créneaux = Σ activités = capa
+  en heures de log du jour). KPI « Capa en heures de log », colonnes « Allait. » et
+  « Capa en h de log » du tableau journalier, ligne « Capa en heures de log (effectif × 8 h) »
+  du graphique, et sous-onglet créneaux cohérent.
+- **Capa planif et productivité du roadmap** — la capa planif (onglet Analyse capa) est
+  calculée sur ces **heures de contrat** : capa heures × (1 − absentéisme RM) × productivité
+  **du modèle RM** (section `Productivité`, valeur hebdomadaire de la semaine concernée),
+  avec la clé exacte par activité et canal ; les hypothèses manuelles ci-dessous restent
+  prioritaires.
+- **Hypothèses de productivité manuelles** (onglet Analyse capa, section « Hypothèses de
+  productivité — actes / heure ») — une ligne par activité × canal ; la valeur RM courante est
+  affichée sous chaque champ. Saisir une valeur **remplace** l'hypothèse RM (badge
+  « manuel — prioritaire », le KPI « Capa planif » le précise) ; vider le champ pour revenir au
+  modèle RM. Les valeurs saisies sont **sauvegardées automatiquement** et retrouvées après
+  actualisation.
+- **Bouton ↻ Actualiser sur chaque page** (Roadmap, Planification, Analyse capa, Analyse
+  réalisé) — recharge les fichiers préchargés du site (sans jamais écraser les données importées
+  localement), ré-affiche la page courante et met à jour l'entête.
+
+4. **Analyse réalisé** (ex-Productivité) — sections Phone / Mail / Chat : QS, QP, QE, T/P, DMT,
+   productivité, taux d'occupation, d'après EXT_Entrant et EXT_Email. *Rework prévu avec l'équipe.*
+
+## Mise à jour des données préchargées (avancer les données du site)
+
+Les données du site sont celles des JSON de `data/`. Pour les rafraîchir :
+1. soit importer les nouveaux fichiers via le bouton **Importer** puis **Exporter data.json** ;
+2. soit régénérer les JSON en local avec les scripts de `scripts/` et pousser le dépôt.
+
+## Déploiement — UN SEUL FICHIER
+
+L'outil est **entièrement contenu dans index.html** : CSS, Chart.js, XLSX, application et
+**toutes les données préchargées** (roadmap, prévision, planification, réalisé, DMT, mail,
+réalisé par conseiller). Aucun fichier annexe, aucune dépendance réseau : **aucune requête
+n'est envoyée** (le chargement de repli par fetch a été supprimé en v14).
+- Déployez index.html seul (intranet, SharePoint, Netlify, clé USB…) : il ne peut plus y
+  avoir de « remise à 0 » liée à des fichiers manquants.
+- **Vérification après déploiement** : en haut à droite, la pastille **« Socle 9/9 ✓ »**
+  doit apparaître. Si elle affiche **« Socle 0/9 ⚠ »** (en rouge), le fichier déployé est
+  tronqué ou ce n'est pas la bonne version : re-déployez index.html ENTIER.
+- Au démarrage, l'outil compare l'état sauvegardé du navigateur (IndexedDB) au socle intégré
+  et **garde la source la plus complète** : un état vide ou corrompu ne peut plus masquer
+  les données ; les saisies de l'utilisateur restent prioritaires.
+- Les boutons « Démo » et « Réinitialiser » ont été retirés : aucune action de l'interface
+  ne peut effacer les données.
+- Une sauvegarde vide est refusée (garde-fou anti-écrasement du socle).
+
+## Déploiement Cloudflare (manuel)
+
+1. Ouvrir le dashboard Cloudflare → **Workers & Pages** → worker `dashboard-capa`.
+2. **Edit code** → **Create new deployment** → **Upload assets**.
+3. Glisser le dossier `dashboard-capa` (contenant `index.html`, `js/`, `data/`…).
+4. **Deploy** — ⚠️ ne jamais cliquer « Retry deployment » sur un ancien déploiement
+   (cela re-déploie l'ancienne version).
+5. Vérification : ouvrir l'URL en **navigation privée** et Ctrl+Shift+R ;
+   la ligne d'entête doit afficher `maj 2026-11-12` et des libellés de sources génériques
+   (« Modèle capacitaire », « Planification », « Prévision Webhelp ») — jamais de nom de fichier.
+
+En cas de « rien n'a changé » : vérifier dans **Deployments** que la date du déploiement est
+du jour, vérifier que l'URL utilisée correspond bien au compte qui héberge le worker
+(`dashboard-capa.<compte>.workers.dev` — plusieurs sous-domaines = plusieurs comptes),
+puis vider le cache (navigation privée).
