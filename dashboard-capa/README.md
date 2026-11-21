@@ -232,12 +232,29 @@ requête n'est envoyée**.
 - Déployez index.html seul (intranet, SharePoint, Netlify, clé USB…) : il ne peut plus y
   avoir de « remise à 0 » liée à des fichiers manquants.
 - **Vérification après déploiement** : en haut à droite, la pastille **« Socle 9/9 ✓ »**
-  doit apparaître et le badge doit afficher **« v16 · 2026-11-19 »**. Pastille **« 0/9 ⚠ »**
+  doit apparaître et le badge doit afficher **« v17 · 2026-11-19 »**. Pastille **« 0/9 ⚠ »**
   (rouge) = fichier tronqué ou mauvaise version : re-déployez index.html ENTIER.
 - **Empreinte du bon fichier** : SHA-256 indiqué dans le message de livraison du 19/11.
 - Au démarrage, l'outil compare l'état sauvegardé du navigateur (IndexedDB) au socle intégré
   et **garde la source la plus complète** ; l'import du classeur DASHBOARD reconstruit aussi
   le suivi par conseiller et les créneaux (dates du fichier importé).
+
+## Nouveautés v17
+
+- **Navigation** : onglet Planification supprimé ; « Analyse capa » devient **Analyse global** ;
+  « Analyse réalisé » devient **Analyse indicateurs** ; sous-onglet « Vue d'ensemble » (ex-Suivi flux).
+- **Filtres de période partout** : Tout / **Mois** / **Semaine** / **Du / Au** (grisés sur Roadmap).
+- **Roadmap** : uniquement 2026 à partir de novembre (semaines antérieures retirées du socle) ;
+  semaines ISO lundi → dimanche (S46 = 09/11 → 15/11).
+- **Analyse global** — réalisé vs projeté (vues Mois / Semaine / Jour) :
+  A. Heures : besoin (Roadmap) · capa de log projetée = capa × (1 − % abs prévu) · loguées réelles + écarts ;
+  B. Actes : prévision finale (Roadmap) · capa en actes · traités réels (entrant + sortant + mail, chat n/d) ;
+  C. Splits journalier / par créneaux / par activité : projeté (poids Webhelp) vs réalisé (part des traités).
+- **Analyse indicateurs** : QP = Reçus/Prévision (appel) · QS = Traités/Reçus · QS 115 % = Traités/(Prévision × 1,15) ·
+  T/P = Traités/Prévision · DMT réelle · « n/d » quand la donnée manque.
+- **Refonte CSS façon Tailwind** : tableaux à grille (bordures fines), volets figés (en-têtes + colonne
+  d'étiquettes), en-têtes multi-niveaux, MFC restreinte aux colonnes clés (absentéisme, CPH, QP, QS,
+  QS 115 %, T/P), notes et commentaires de l'Analyse par conseiller supprimés.
 
 ## Nouveautés v16
 
